@@ -50,9 +50,14 @@ function Settle {
     return $prev
 }
 
-function Arm($label, $ngen, [string[]]$extra) {
-    $vals = @()
-    for ($r = 1; $r -le 3; $r++) {
+# Odin progon, a ne tri. Povtory gonjatsja snaruzhi vperemezhku po plecham.
+#
+# Pochemu ne blokami. Mashina dvigaetsja vo vremja svipa - tretij povtor odnogo i togo zhe plecha
+# vyhodil na 31% bystree pervogo. Pri blochnoj shkeme ves etot dreif dostajotsja tomu plechu,
+# kotoroe shlo pervym, i objavljaetsja effektom. Pri peremezhajushchejsja - kazhdyj raund soderzhit
+# kazhdoe plecho rovno odin raz, tak chto dreif razdeljaetsja mezhdu nimi porovnu i sravnenie
+# vyzhivaet, dazhe esli absoljutnye chisla plyvut.
+function Arm1($label, $ngen, [string[]]$extra, $r) {
         $so = 'D:\MemeX\results\_rg' + "_$r.out"
         $a = @('-m', $M, '-f', $P, '-n', "$ngen", '-c', '2048', '-t', '8', '-ngl', '0',
                '-fa', 'off', '--seed', '1', '--no-display-prompt') + $extra
@@ -63,25 +68,58 @@ function Arm($label, $ngen, [string[]]$extra) {
         $out = @(); if (Test-Path $so) { $out += Get-Content $so }; if (Test-Path "$so.err") { $out += Get-Content "$so.err" }
         $h = $out | Select-String -Pattern '^(main|llama_print_timings):\s+eval time' | Select-Object -First 1
         if ($h -and $h.Line -match '([\d.]+) tokens per second') { $vals += [double]$Matches[1] }
-        $null = Settle
-    }
-    if ($vals.Count -lt 2) { Note ("{0,-28} menshe dvuh povtorov - ne rezultat" -f $label); return }
-    $mean = ($vals | Measure-Object -Average).Average
-    $spread = 100.0*(($vals|Measure-Object -Maximum).Maximum - ($vals|Measure-Object -Minimum).Minimum)/$mean
-    $flag = if ($spread -gt 4.2) { '  <<< vyshe shuma' } else { '' }
-    Note ("{0,-28} {1,6:N2} tok/s (razbros {2:N1}%, {3}){4}" -f $label, $mean, $spread,
-          (($vals | ForEach-Object { $_.ToString('N2') }) -join '/'), $flag)
+    $null = Settle
+    if ($vals.Count -lt 1) { return $null }
+    return $vals[0]
 }
 
 ("`n`n######## regressija ili argumenty " + (Get-Date)) | Add-Content $LOG
 if (-not (Take-Machine -Who 'regress' -TimeoutMin 300 -MinFreeGB 16)) { Note 'mashinu ne poluchili'; exit 1 }
 Note ('vladeem: ' + (Get-LockHolder))
 try {
-    Say 'tot zhe binarnik, dva znachenija -n, s perepakovkoj i bez'
-    Arm 'n=256, rtr  (kak baza 14.04)' 256 @('-rtr')
-    Arm 'n=192, rtr  (kak tablica)'    192 @('-rtr')
-    Arm 'n=256, mmap'                  256 @()
-    Arm 'n=192, mmap'                  192 @()
+    $arms = @(
+        @{ n='n=256, rtr  (kak baza 14.04)'; g=256; e=@('-rtr') },
+        @{ n='n=192, rtr  (kak tablica)';    g=192; e=@('-rtr') },
+        @{ n='n=256, mmap';                  g=256; e=@()       },
+        @{ n='n=192, mmap';                  g=192; e=@()       })
+    $res = @{}
+    foreach ($a in $arms) { $res[$a.n] = @() }
+
+    Say 'progrev - odna zagruzka, kotoraja ne schitaetsja'
+    # The machine was measurably faster on the third load of the same file than on the first. One
+    # discarded load pays for that once, instead of charging it to whichever arm ran first.
+    $null = Arm1 'progrev' 32 @('-rtr') 0
+    Note 'progrev sdelan'
+
+    Say 'chetyre plecha, tri raunda vperemezhku'
+    for ($round = 1; $round -le 3; $round++) {
+        # Chereduem napravlenie: inache plecho, stojashchee poslednim, vsegda idjot na samoj
+        # progretoj mashine.
+        $order = if ($round % 2 -eq 1) { $arms } else { $arms[($arms.Count-1)..0] }
+        foreach ($a in $order) {
+            $v = Arm1 $a.n $a.g $a.e $round
+            if ($v) { $res[$a.n] += $v }
+        }
+        Note ("raund {0} projden" -f $round)
+    }
+
+    Say 'itog'
+    foreach ($a in $arms) {
+        $vals = $res[$a.n]
+        if ($vals.Count -lt 2) { Note ("{0,-28} menshe dvuh povtorov - ne rezultat" -f $a.n); continue }
+        $mean = ($vals | Measure-Object -Average).Average
+        $spread = 100.0*(($vals|Measure-Object -Maximum).Maximum - ($vals|Measure-Object -Minimum).Minimum)/$mean
+        $flag = if ($spread -gt 4.2) { '  <<< vyshe shuma' } else { '' }
+        Note ("{0,-28} {1,6:N2} tok/s (razbros {2:N1}%, {3}){4}" -f $a.n, $mean, $spread,
+              (($vals | ForEach-Object { $_.ToString('N2') }) -join '/'), $flag)
+    }
+    # Kazhdyj raund soderzhit kazhdoe plecho rovno odin raz, poetomu srednee po raundu otlichaetsja
+    # tolko tem, KOGDA on shjol. Eto prjamoj zamer dreifa mashiny.
+    Say 'dreif mashiny po raundam'
+    for ($round = 1; $round -le 3; $round++) {
+        $rv = @(); foreach ($a in $arms) { if ($res[$a.n].Count -ge $round) { $rv += $res[$a.n][$round-1] } }
+        if ($rv.Count) { Note ("raund {0}: srednee po plecham {1:N2} tok/s" -f $round, (($rv | Measure-Object -Average).Average)) }
+    }
     Say 'kak chitat'
     Note 'n=256 rtr okolo 14  -> regressii net, vinovat argument -n'
     Note 'vse okolo 10-11     -> regressija est; raznica rtr protiv mmap pokazhet, v perepakovke li ona'
