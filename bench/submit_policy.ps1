@@ -80,6 +80,19 @@ function Note($m) { ("  " + $m) | Tee-Object -FilePath $LOG -Append }
 # One llama-cli run under one setting of the switches. Prefill and generation both come out of the
 # same process, so an arm costs one model load rather than two.
 function RunOnce($tag, $divisor, $tail, $limitSec) {
+    # Who else is on the machine, sampled at the moment this arm starts.
+    #
+    # This is here because the evening's 15-35 percent drift turned out to be an agent on an
+    # unrelated project compiling, and neither the harness nor the lock saw it: the guard was a list
+    # of the compiler names WE use, and a different toolchain is not on that list. Two diagnoses
+    # were argued from that absence and both were wrong. Get-CpuHogs asks how much of the machine a
+    # process is eating rather than what it is called, so it cannot be fooled the same way - and
+    # logging it per run means the next anomalous arm arrives with the evidence attached instead of
+    # with a story fitted to it afterwards.
+    $hogs = Get-CpuHogs -MinPct 12
+    if ($hogs) {
+        Note ('  KONKURENTY pered progonom: ' + (($hogs | ForEach-Object { "$($_.Name)/$($_.Id) $([math]::Round($_.Pct,0))%" }) -join ', '))
+    }
     $so = "D:\MemeX\results\_sp_$tag.out"
     $env:GGML_VK_SUBMIT_DIVISOR = "$divisor"
     $env:GGML_VK_SUBMIT_TAIL    = "$tail"
@@ -234,7 +247,9 @@ try {
             Note 'Sravnenie mezhdu plechami vyzhivaet (kazhdyj raund soderzhit vse plechi),'
             Note 'sravnenie s ljubym izmereniem drugogo dnja - net.'
         } else {
-            Note ("{0:N1} procenta mezhdu raundami - v predelah shuma, mashina stojala rovno" -f $rs)
+            Note ("{0:N1} procenta mezhdu raundami - v predelah shuma, mashina stojala rovno." -f $rs)
+            Note 'Eto samo po sebe rezultat: ranshe segodnja te zhe plechi hodili na 15-35 procentov,'
+            Note 'i edinstvennoe chto izmenilos - chuzhaja sborka na sosednem proekte ostanovlena.'
         }
     }
 } finally {

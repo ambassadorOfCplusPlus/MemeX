@@ -154,7 +154,17 @@ function Get-CpuHogs {
 
 # Tot zhe vopros, no odnim otvetom: est li chuzhaja nagruzka krome nashej sobstvennoj.
 function Test-ForeignLoad {
-    param([string[]]$Ours = @('llama-cli','llama-perplexity','llama-quantize','llama-imatrix',
+    # Sobstvennaja infrastruktura v spisok vhodit objazatelno, i eto ne udobstvo, a uslovie
+    # korrektnosti. Odin odnopotochnyj claude - eto 12.5% ot vosmi jader, to est vyshe poroga.
+    # Bez etoj stroki Take-Machine zajavljaet zamok, vidit agenta, kotoryj vypolnjaet zaprosivshij
+    # skript, udaljaet svoj zhe zamok i uhodit na povtor - i tak do konca tajm-auta. Prosjashchij
+    # process po postroeniju zanjat imenno v etot moment, potomu chto on i est tot, kto prosit.
+    #
+    # Imenno ot etogo imennoj variant proverki byl sluchajno zashchishchjon: 'claude' nikogda ne
+    # popadal v spisok, po kotoromu on iskal. Sud po nagruzke etu sluchajnost ubiraet, i zashchitu
+    # prihoditsja pisat javno.
+    param([string[]]$Ours = @('claude','pwsh','powershell','node','conhost','WindowsTerminal','git',
+                              'llama-cli','llama-perplexity','llama-quantize','llama-imatrix',
                               'llama-moe-trace','llama-bench','llama-memex-fwd','llama-memex-test',
                               'llama-memex-kv','llama-memex-vkdisp','llama-memex-vksplit',
                               'memex-test','memex-qerr'),
