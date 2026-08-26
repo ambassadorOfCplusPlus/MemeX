@@ -47,6 +47,33 @@ $LOG = 'D:\MemeX\results\submit_policy.log'
 $M   = 'D:\Qwen3-Coder-30B-A3B-mx1.gguf'
 $P   = 'D:\MemeX\results\prompt_2000.txt'
 
+# Wait on state, not on a clock.
+#
+# A fixed sleep between replicates was the harness's assumption that fifteen seconds is enough for
+# the machine to become idle again. It is not. Each of these runs holds about 15 GB and frees it on
+# exit, and Windows zeroes freed pages in a background thread - so the next replicate starts while
+# the system is still working through the last one's leavings, and gets fewer cores than it asked
+# for. The evidence is in the prefill column of the run that held the lock before this one:
+# 116.80 ms/token on one replicate and 31.71 on the next, of an unchanged arm. Prefill is
+# compute-bound; a 3.7x swing there is not bandwidth, not cache and not thermals, it is the process
+# not getting the cores.
+#
+# So: poll free memory until it stops rising. Two readings within 200 MB means the reclaim has
+# finished. The cap is there because a wait that cannot end is worse than a wait that is too short -
+# thirteen hours were lost to one in this project - and because on a machine that is genuinely busy
+# with something else, the lock, not this loop, is the thing that should be complaining.
+function Wait-Settled([int]$capSec = 180, [int]$deltaMB = 200) {
+    $prev = -1.0
+    $deadline = (Get-Date).AddSeconds($capSec)
+    while ((Get-Date) -lt $deadline) {
+        Start-Sleep -Seconds 5
+        $free = (Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1KB   # KiB -> MiB
+        if ($prev -ge 0 -and [math]::Abs($free - $prev) -lt $deltaMB) { return $free }
+        $prev = $free
+    }
+    return $prev
+}
+
 function Say($m)  { ("`n[{0}] ===== {1}" -f (Get-Date -Format 'HH:mm'), $m) | Tee-Object -FilePath $LOG -Append }
 function Note($m) { ("  " + $m) | Tee-Object -FilePath $LOG -Append }
 
@@ -87,7 +114,9 @@ function RunOnce($tag, $divisor, $tail, $limitSec) {
         $bad = $out | Select-String -Pattern 'not supported|failed|error|abort|assert' | Select-Object -First 1
         if ($bad) { $res.err = $bad.Line.Trim() }
     }
-    Start-Sleep -Seconds 10
+    # $null = : a bare call would emit its return value into RunOnce's output stream and
+    # the caller would receive an array instead of the result hashtable.
+    $null = Wait-Settled
     return $res
 }
 

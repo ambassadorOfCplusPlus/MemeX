@@ -53,7 +53,7 @@ function Take-Machine {
                 continue
             }
         }
-        if ((Test-ForeignModel) -or (Test-ForeignBuild)) {
+        if ((Test-ForeignModel) -or (Test-ForeignBuild) -or (Test-ForeignLoad)) {
             Remove-Item -LiteralPath $script:MEMEX_LOCK -Force -ErrorAction SilentlyContinue
             Start-Sleep -Seconds 45
             continue
@@ -119,6 +119,48 @@ function Test-ForeignModel {
                      'llama-bench','llama-memex-fwd','llama-memex-test','llama-memex-kv',
                      'memex-test','memex-qerr')) {
         if (Get-Process -Name $n -ErrorAction SilentlyContinue) { return $true }
+    }
+    return $false
+}
+
+# Kto zabiraet jadra PRJAMO SEJCHAS - po prirostu processornogo vremeni, i bez spiska imjon.
+#
+# Zachem eto ponadobilos. Ves vecher zamery guljali na 8-35% pri poroge shuma 4.2, i ja trizhdy
+# proverjal "tihaja li mashina" spiskom processov po imenam: cl, MSBuild, link, cmake, ninja.
+# Sborka drugogo proekta drugim instrumentom v takoj filtr ne popadaet vovse. Ja iskal tu pomehu,
+# kotoruju ozhidal, a ne pomehu voobshche.
+#
+# Prirost, a ne nalichie - potomu chto MSBuild derzhit prostaivajushchih demonov, kotorye odnazhdy
+# zamorozili etu ochered na 2.5 chasa. I bez spiska imjon - potomu chto imja govorit o tom, chto
+# process soboj predstavljaet, a ne o tom, skolko on jest.
+function Get-CpuHogs {
+    param([int]$SampleMs = 2000, [double]$MinPct = 8.0, [int]$Top = 6)
+    $ncpu = [Environment]::ProcessorCount
+    $before = @{}
+    foreach ($p in Get-Process -EA SilentlyContinue) { try { $before[$p.Id] = @($p.ProcessName, $p.CPU) } catch {} }
+    Start-Sleep -Milliseconds $SampleMs
+    $out = @()
+    foreach ($p in Get-Process -EA SilentlyContinue) {
+        try {
+            if (-not $before.ContainsKey($p.Id)) { continue }
+            $d = $p.CPU - $before[$p.Id][1]
+            if ($d -le 0) { continue }
+            $pct = 100.0 * $d / ($SampleMs / 1000.0) / $ncpu
+            if ($pct -ge $MinPct) { $out += [pscustomobject]@{ Name = $p.ProcessName; Id = $p.Id; Pct = $pct } }
+        } catch {}
+    }
+    return $out | Sort-Object Pct -Descending | Select-Object -First $Top
+}
+
+# Tot zhe vopros, no odnim otvetom: est li chuzhaja nagruzka krome nashej sobstvennoj.
+function Test-ForeignLoad {
+    param([string[]]$Ours = @('llama-cli','llama-perplexity','llama-quantize','llama-imatrix',
+                              'llama-moe-trace','llama-bench','llama-memex-fwd','llama-memex-test',
+                              'llama-memex-kv','llama-memex-vkdisp','llama-memex-vksplit',
+                              'memex-test','memex-qerr'),
+          [double]$MinPct = 12.0)
+    foreach ($h in (Get-CpuHogs)) {
+        if ($Ours -notcontains $h.Name -and $h.Pct -ge $MinPct) { return $true }
     }
     return $false
 }
