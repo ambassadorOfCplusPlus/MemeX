@@ -792,3 +792,37 @@ The test is one run of mx1 with spec_study's exact arguments (-n 256), against t
 192), on the same binary. Until that is done, 11.1 is not reported as a result and 14.04 is not
 assumed to still hold. Both numbers are suspect in different ways, which is exactly the situation
 the spread flag exists to make visible rather than paper over.
+
+## Popravka: submit ne na kazhdom uzle, a na kazhdom matumnozhenii
+
+I put 17.4 ms/token on the board for submit cost, from 15 nodes x 48 layers x 24.1 us. That was
+wrong twice over.
+
+Only MUL_MAT and MUL_MAT_ID add to mul_mat_bytes, so nodes that are not matmuls never trigger the
+byte rule. And the threshold doubles after each of the first three submits (submit_count < 3).
+Measured on a chain of 15 matmuls, submits land at nodes 1, 2, 4, 7, 10, 13, 15 - seven, not
+fifteen. A real layer has 5-7 matmuls among its ~15 nodes, so 5-7 submits per Vulkan split, and the
+item is **6-8 ms per token, not 17.4**.
+
+Still the largest single line, still worth the sweep, but the plan carries the measured number when
+it arrives rather than my estimate.
+
+## Vtoraja cel evristiki otpravok, kotoruju ja propustil
+
+I read the submit rule as one thing - batching to overlap host recording with device execution.
+There is a second clause, `almost_ready`, and its consumer is ggml_vk_wait_for_fence
+(ggml-vulkan.cpp:1166): the host does `waitForFences` on the almost-ready fence while most of the
+graph runs, and only busy-spins with YIELD over the tail.
+
+So that submit is not there to batch work. It is there to give the host something to **sleep** on.
+Remove it and the host spins through the entire graph - and on this machine the host is not idle
+during that time, it is running the CPU's share of the experts on eight threads. Buying one fewer
+submit costs a core that was doing the work the whole design is built to overlap.
+
+The general shape, worth keeping: a piece of code can have two purposes, and the second is often
+visible only from its consumer rather than from the code itself or its comment. The comment here
+describes the batching purpose accurately and does not mention the sleeping one at all.
+
+A third constraint from the same place: the min(100 MB, ...) cap bounds how long a single submission
+runs, and Windows kills a kernel at about 2 s. Turning the byte rule fully off removes that bound
+and the failure mode is a device-lost, not a slow run. So the sweep prefers a small divisor to zero.
