@@ -99,7 +99,18 @@ function Get-LockHolder {
 # sampling interval is not compiling, whatever its name is.
 function Test-ForeignBuild {
     param([int]$SampleMs = 1500, [double]$MinCpuSec = 0.4)
-    $names = 'cl','MSBuild','cmake','ninja','link','lib','rc','cl_arm64'
+    # Imena nazvany sosedom po mashine, i eto ne dogadka: `dotnet build` NE sozdajot processa
+    # MSBuild.exe. Sborka .NET SDK idjot vnutri dotnet.exe (MSBuild tam bibliotekoj), a C#
+    # kompiliruet otdelnyj rezidentnyj server VBCSCompiler.exe. Ni togo, ni drugogo v spiske ne
+    # bylo - poetomu proverka chestno otvechala "chisto", poka sosed zhjog vosem potokov i portil
+    # chetyre tablicy zamerov podrjad.
+    #
+    # VBCSCompiler - tot zhe sluchaj, chto node-reuse demony MSBuild: on zhivjot mezhdu sborkami i
+    # prostaivaet. Sud po prirostu processornogo vremeni s nim spravljaetsja verno, a sud po
+    # nalichiju zamorozil by ochered tak zhe, kak odnazhdy na 2.5 chasa.
+    #
+    # java - na budushchee: sborka Android cherez gradlew pojdjot pod nim i opjat mimo spiska.
+    $names = 'cl','MSBuild','msbuild','dotnet','VBCSCompiler','java','cmake','ninja','link','lib','rc','cl_arm64'
     $before = @{}
     foreach ($pr in Get-Process -Name $names -ErrorAction SilentlyContinue) {
         try { $before[$pr.Id] = $pr.CPU } catch { }
