@@ -767,3 +767,28 @@ Consequence to design in now rather than discover later: Qwen3.6's delta-net lay
 state that ggml_delta_net reads and writes - 2.20 MB per layer, 65.9 MB for all thirty. If those
 layers run on the card, the state lives there and is updated in place. It must never be mirrored to
 the host per token.
+
+## Otkrytyj vopros: 11.1 tok/s protiv bazy 14.04, mashina byla tihoj
+
+The three-model table gave mx1 at 10.87-11.12 tok/s with a 15.8% spread, on a machine with no
+compiler running, 24.3 GB free and 0.5 GB of page file in use. The run itself is healthy: model
+loads at 15.365 GiB, all 337 tensors repack, prompt eval 32.65 tok/s, eval 89.90 ms/token.
+
+That is 20% below the 14.04 measured cleanly earlier today at a 2.0% spread, and 89.90 ms implies
+2.23 GB per token against the 1.72 GB the file accounts for. So either something regressed or the
+two numbers are not comparable.
+
+Two candidates, and they are cheap to separate:
+
+  - The arms differ: 14.04 was measured with -n 256, this table uses -n 192. A shorter generation
+    puts more of the run into warm-up, but 27% is far more than that should buy.
+  - Our patches to the fork touch the decode path of this exact model. build_qwen3.cpp changes only
+    a callback label, which is free, and the additions to llama-build-context.cpp are gated behind
+    MEMEX_SHARED_EXPERTS and MEMEX_CACHE_BONUS. But llama.cpp gained 135 lines and llama-build-
+    context.cpp 160, and I have not verified that none of them costs anything when their flags are
+    off.
+
+The test is one run of mx1 with spec_study's exact arguments (-n 256), against this table's (-n
+192), on the same binary. Until that is done, 11.1 is not reported as a result and 14.04 is not
+assumed to still hold. Both numbers are suspect in different ways, which is exactly the situation
+the spread flag exists to make visible rather than paper over.
