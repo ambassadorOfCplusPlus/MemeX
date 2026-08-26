@@ -42,10 +42,23 @@
 
 $ErrorActionPreference = 'Continue'
 . 'C:/Users/User11/Desktop/MemeX/bench/lock.ps1'
-$VK  = 'D:\MemeX\src\ik_llama.cpp\build-vk\bin\Release'
+# VKBIN, PROMPT, MODEL and not VK, P, M.
+#
+# PowerShell variable names are case-insensitive, and each of these lived at script scope beside a
+# short loop variable spelled the same way. The sweep died on its second arm because of it: the
+# line that logs a result assigned the graph_compute milliseconds to a variable spelled v-k, which
+# IS the binary directory, so the next arm launched `40992,3\llama-cli.exe` and Start-Process
+# reported "cannot find the specified file". One arm had already produced a clean number by then,
+# which is what made it look like a machine problem rather than a script problem.
+#
+# The same trap was one keystroke away twice more: the process handle against the prompt path, and
+# the message parameter of Say/Note against the model path. Those two survived only because a
+# function parameter is local and the prompt is read before the process handle is assigned.
+# Surviving by luck is not a reason to keep the names.
+$VKBIN  = 'D:\MemeX\src\ik_llama.cpp\build-vk\bin\Release'
 $LOG = 'D:\MemeX\results\submit_policy.log'
-$M   = 'D:\Qwen3-Coder-30B-A3B-mx1.gguf'
-$P   = 'D:\MemeX\results\prompt_2000.txt'
+$MODEL  = 'D:\Qwen3-Coder-30B-A3B-mx1.gguf'
+$PROMPT = 'D:\MemeX\results\prompt_2000.txt'
 
 # Wait on state, not on a clock.
 #
@@ -102,13 +115,28 @@ function RunOnce($tag, $divisor, $tail, $limitSec) {
     # inside graph_compute are what the policy actually changes, and neither depends on how fast
     # the CPU ran its half.
     $env:GGML_VK_SUBMIT_STATS   = '1'
-    $a = @('-m', $M, '-f', $P, '-n', '128', '-c', '4096', '-t', '8',
+    $a = @('-m', $MODEL, '-f', $PROMPT, '-n', '128', '-c', '4096', '-t', '8',
            '-fa', 'off', '--seed', '1', '--no-display-prompt',
            '-ngl', '99', '-ot', 'exps=CPU')
-    $p = Start-Process -FilePath "$VK\llama-cli.exe" -ArgumentList $a -WindowStyle Hidden -PassThru -RedirectStandardOutput $so -RedirectStandardError "$so.err"
-    $done = $p.WaitForExit($limitSec * 1000)
+    # A failed launch must cost one arm, not the sweep. When the binary path was corrupted the
+    # throw propagated all the way out of the round loop and out of the try/finally, so the
+    # machine was handed back after a single arm had run and another queued script took it -
+    # ten minutes of measurement thrown away for a fault that concerned one process. Catching it
+    # here turns the same fault into one NE POSHLO line and lets the remaining arms run.
+    $proc = $null
+    try {
+        $proc = Start-Process -FilePath "$VKBIN\llama-cli.exe" -ArgumentList $a -WindowStyle Hidden -PassThru -RedirectStandardOutput $so -RedirectStandardError "$so.err"
+    } catch {
+        Remove-Item Env:\GGML_VK_SUBMIT_DIVISOR, Env:\GGML_VK_SUBMIT_TAIL, Env:\GGML_VK_SUBMIT_STATS -EA SilentlyContinue
+        return @{ err = ("ne zapustilsja: " + $_.Exception.Message) }
+    }
+    if ($null -eq $proc) {
+        Remove-Item Env:\GGML_VK_SUBMIT_DIVISOR, Env:\GGML_VK_SUBMIT_TAIL, Env:\GGML_VK_SUBMIT_STATS -EA SilentlyContinue
+        return @{ err = "Start-Process nichego ne vernul" }
+    }
+    $done = $proc.WaitForExit($limitSec * 1000)
     Remove-Item Env:\GGML_VK_SUBMIT_DIVISOR, Env:\GGML_VK_SUBMIT_TAIL, Env:\GGML_VK_SUBMIT_STATS -EA SilentlyContinue
-    if (-not $done) { Stop-Process -Id $p.Id -Force -EA SilentlyContinue; return @{ err = 'tajm-aut' } }
+    if (-not $done) { Stop-Process -Id $proc.Id -Force -EA SilentlyContinue; return @{ err = 'tajm-aut' } }
     $out = @(); if (Test-Path $so) { $out += Get-Content $so }
     if (Test-Path "$so.err") { $out += Get-Content "$so.err" }
     $res = @{ err = '' }
@@ -221,10 +249,10 @@ try {
             } else {
                 $pv = 0.0
                 if ($res.ContainsKey('pre')) { $pv = $res.pre }
-                $sp = 0.0; $vk = 0.0
-                if ($res.ContainsKey('subper')) { $sp = $res.subper; $vk = $res.vkms }
+                $subs = 0.0; $vkms = 0.0
+                if ($res.ContainsKey('subper')) { $subs = $res.subper; $vkms = $res.vkms }
                 Note ("{0,-30} raund {1} [{2}]: prefill {3,7:N2}  gen {4,6:N2}  submitov/graf {5,5:N2}  vk {6,8:N1} ms" -f
-                      $arm.label, $r, $t0.ToString('HH:mm'), $pv, $res.gen, $sp, $vk)
+                      $arm.label, $r, $t0.ToString('HH:mm'), $pv, $res.gen, $subs, $vkms)
             }
         }
         if ($gs.Count -gt 0) { $roundGen += ($gs | Measure-Object -Average).Average }
