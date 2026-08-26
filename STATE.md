@@ -826,3 +826,23 @@ describes the batching purpose accurately and does not mention the sleeping one 
 A third constraint from the same place: the min(100 MB, ...) cap bounds how long a single submission
 runs, and Windows kills a kernel at about 2 s. Turning the byte rule fully off removes that bound
 and the failure mode is a device-lost, not a slow run. So the sweep prefers a small divisor to zero.
+
+## Tablica trjoh modelej ot 26 avgusta: vybroshena celikom
+
+Every arm above the 4.2% noise floor, the last one at 103.6%:
+
+    30B mx1, rtr     10.87  (15.8%)    Gemma rtr    6.23  (28.3%)
+    30B mx1, mmap    10.38  ( 7.6%)    Gemma mmap   5.39  (35.0%)
+    35B Q6_K, mmap    5.04  (103.6%, 2.73/4.43/7.95)
+
+Not reported as results. The cause was an external build - a different project compiling on this
+machine for part of the evening - plus a harness that slept a fixed fifteen seconds between
+replicates instead of waiting for the system to settle after a 16 GB process exits.
+
+Worth keeping the row for the 35B: a 103.6% spread is not noise, it is a measurement of something
+else entirely, and printing it as 5.04 tok/s without the spread would have been a plausible number
+with nothing behind it. The flag earned its keep on this table more than anywhere else.
+
+What the table would have said if it had held: the byte-budget ceilings are 14.7, 9.8 and 8.9 tok/s
+for the 30B, Gemma and the 35B respectively. Any measured value materially below those is either
+contention or a real inefficiency, and until the machine is quiet the two cannot be told apart.
