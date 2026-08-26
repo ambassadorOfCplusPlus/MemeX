@@ -56,12 +56,18 @@ function RunOnce($tag, $divisor, $tail, $limitSec) {
     $so = "D:\MemeX\results\_sp_$tag.out"
     $env:GGML_VK_SUBMIT_DIVISOR = "$divisor"
     $env:GGML_VK_SUBMIT_TAIL    = "$tail"
+    # The direct measurement. tok/s on this configuration is mostly the CPU's expert share, and the
+    # machine has been moving 15-25 percent this evening for reasons nobody has found; an effect
+    # worth a few percent of a token cannot be read off it. Submits per graph and milliseconds
+    # inside graph_compute are what the policy actually changes, and neither depends on how fast
+    # the CPU ran its half.
+    $env:GGML_VK_SUBMIT_STATS   = '1'
     $a = @('-m', $M, '-f', $P, '-n', '128', '-c', '4096', '-t', '8',
            '-fa', 'off', '--seed', '1', '--no-display-prompt',
            '-ngl', '99', '-ot', 'exps=CPU')
     $p = Start-Process -FilePath "$VK\llama-cli.exe" -ArgumentList $a -WindowStyle Hidden -PassThru -RedirectStandardOutput $so -RedirectStandardError "$so.err"
     $done = $p.WaitForExit($limitSec * 1000)
-    Remove-Item Env:\GGML_VK_SUBMIT_DIVISOR, Env:\GGML_VK_SUBMIT_TAIL -EA SilentlyContinue
+    Remove-Item Env:\GGML_VK_SUBMIT_DIVISOR, Env:\GGML_VK_SUBMIT_TAIL, Env:\GGML_VK_SUBMIT_STATS -EA SilentlyContinue
     if (-not $done) { Stop-Process -Id $p.Id -Force -EA SilentlyContinue; return @{ err = 'tajm-aut' } }
     $out = @(); if (Test-Path $so) { $out += Get-Content $so }
     if (Test-Path "$so.err") { $out += Get-Content "$so.err" }
@@ -70,6 +76,13 @@ function RunOnce($tag, $divisor, $tail, $limitSec) {
     if ($hg -and $hg.Line -match '([\d.]+) tokens per second') { $res.gen = [double]$Matches[1] }
     $hp = $out | Select-String -Pattern 'prompt eval time' | Select-Object -First 1
     if ($hp -and $hp.Line -match '([\d.]+) tokens per second') { $res.pre = [double]$Matches[1] }
+    $hs = $out | Select-String -Pattern 'ggml_vulkan submit stats' | Select-Object -First 1
+    if ($hs -and $hs.Line -match 'grafov (\d+), uzlov (\d+) \(([\d.]+) na graf\), submitov (\d+) \(([\d.]+) na graf, ([\d.]+) na uzel\), v graph_compute ([\d.]+) ms') {
+        $res.graphs    = [double]$Matches[1]
+        $res.nodesper  = [double]$Matches[3]
+        $res.subper    = [double]$Matches[5]
+        $res.vkms      = [double]$Matches[7]
+    }
     if (-not $res.ContainsKey('gen')) {
         $bad = $out | Select-String -Pattern 'not supported|failed|error|abort|assert' | Select-Object -First 1
         if ($bad) { $res.err = $bad.Line.Trim() }
@@ -113,30 +126,87 @@ try {
         @{ tag = 'D0';  label = 'D. divisor 0, bajty off';  div = 0;  tail = 1 },
         @{ tag = 'E0T'; label = 'E. divisor 0, bez tail';   div = 0;  tail = 0 }
     )
-    foreach ($arm in $arms) { $arm.gen = @(); $arm.pre = @() }
+    foreach ($arm in $arms) { $arm.gen = @(); $arm.pre = @(); $arm.subper = @(); $arm.vkms = @(); $arm.nodesper = @() }
+
+    # Per-round means across all arms. Every round contains every arm exactly once, so these are
+    # directly comparable to each other and the only thing that separates them is when they ran.
+    # If they disagree, the machine drifted during the sweep and the arm means are standing on a
+    # moving floor - which is a thing to report, not a thing to average away.
+    $roundGen = @(); $roundPre = @()
 
     Say "svip politiki otpravki, raundov: $reps, plech: $($arms.Count)"
     Note 'znak vosklicanija posle razbrosa = vyshe shumovogo poroga 4.2 procenta'
 
+    # One load thrown away before anything is counted. The run holding the lock ahead of this one
+    # reported 5.61 / 5.71 / 7.37 across three replicates of one unchanging arm - the third load
+    # 31 percent faster than the first - and 10.22 / 10.06 / 10.85 on another. Replicate three
+    # being the fast one in two arms out of three is not thermal drift, which would go the other
+    # way; it is the model arriving in the page cache. Counterbalancing does not fix that, because
+    # it is a trend across rounds rather than a position within one. Discarding the first load does.
+    Say 'progrev: odna zagruzka modeli vholostuju, rezultat vybrasyvaetsja'
+    $null = RunOnce 'warm' 40 1 900
+
     for ($r = 1; $r -le $reps; $r++) {
-        Say "raund $r iz $reps"
-        foreach ($arm in $arms) {
+        # Counterbalanced order: odd rounds forward, even rounds reversed. Interleaving already
+        # stops a slow drift from being charged to one arm, but with a fixed order a drift WITHIN
+        # a round still lands on arm position - the arm that always runs last always runs on the
+        # warmest machine. Reversing alternate rounds cancels that to first order, and costs
+        # nothing but a line. Given the 25% unexplained movement on this machine this evening,
+        # paying nothing for a defence against it is an easy trade.
+        $order = if ($r % 2 -eq 1) { $arms } else { $arms[($arms.Count - 1)..0] }
+        Say ("raund {0} iz {1}, porjadok: {2}" -f $r, $reps, (($order | ForEach-Object { $_.tag }) -join ' '))
+        $gs = @(); $ps = @()
+        foreach ($arm in $order) {
+            $t0 = Get-Date
             $res = RunOnce "$($arm.tag)_$r" $arm.div $arm.tail 900
-            if ($res.ContainsKey('gen')) { $arm.gen += $res.gen }
-            if ($res.ContainsKey('pre')) { $arm.pre += $res.pre }
+            if ($res.ContainsKey('gen')) { $arm.gen += $res.gen; $gs += $res.gen }
+            if ($res.ContainsKey('pre')) { $arm.pre += $res.pre; $ps += $res.pre }
+            if ($res.ContainsKey('subper')) { $arm.subper += $res.subper; $arm.vkms += $res.vkms; $arm.nodesper += $res.nodesper }
             if (-not $res.ContainsKey('gen')) {
                 Note ("{0,-30} raund {1}: NE POSHLO {2}" -f $arm.label, $r, $res.err)
             } else {
                 $pv = 0.0
                 if ($res.ContainsKey('pre')) { $pv = $res.pre }
-                Note ("{0,-30} raund {1}: prefill {2,7:N2}  gen {3,6:N2}" -f $arm.label, $r, $pv, $res.gen)
+                $sp = 0.0; $vk = 0.0
+                if ($res.ContainsKey('subper')) { $sp = $res.subper; $vk = $res.vkms }
+                Note ("{0,-30} raund {1} [{2}]: prefill {3,7:N2}  gen {4,6:N2}  submitov/graf {5,5:N2}  vk {6,8:N1} ms" -f
+                      $arm.label, $r, $t0.ToString('HH:mm'), $pv, $res.gen, $sp, $vk)
             }
         }
+        if ($gs.Count -gt 0) { $roundGen += ($gs | Measure-Object -Average).Average }
+        if ($ps.Count -gt 0) { $roundPre += ($ps | Measure-Object -Average).Average }
     }
 
-    Say 'itog'
+    Say 'itog po plecham (sravnenie vnutri svipa, ne s izmerenijami drugih dnej)'
     foreach ($arm in $arms) {
         Note (("{0,-30}" -f $arm.label) + (Summ 'prefill' $arm.pre) + (Summ 'gen' $arm.gen))
+    }
+
+    # The direct half. Same work in every arm - same prompt, same 128 tokens - so the number of
+    # submits and the time spent inside graph_compute are comparable across arms without any
+    # assumption about what the CPU side was doing.
+    Say 'prjamoe izmerenie: chto imenno menjaet politika'
+    foreach ($arm in $arms) {
+        Note (("{0,-30}" -f $arm.label) + (Summ 'submitov/graf' $arm.subper) +
+              (Summ 'vk ms za progon' $arm.vkms) + (Summ 'uzlov/graf' $arm.nodesper))
+    }
+
+    # The drift check. Each round holds the same five arms, so a difference between rounds is
+    # time and nothing else.
+    Say 'drejf: srednee po vsem plecham v kazhdom raunde'
+    Note (("{0,-30}" -f 'raundy po porjadku') + (Summ 'prefill' $roundPre) + (Summ 'gen' $roundGen))
+    if ($roundGen.Count -ge 2) {
+        $rm = ($roundGen | Measure-Object -Average).Average
+        $rs = 100.0*(($roundGen|Measure-Object -Maximum).Maximum - ($roundGen|Measure-Object -Minimum).Minimum)/$rm
+        Note (('po raundam: ' + (($roundGen | ForEach-Object { $_.ToString('N2') }) -join ' -> ')))
+        if ($rs -gt 4.2) {
+            Note ("DREJF {0:N1} procenta mezhdu raundami - vyshe poroga 4.2. Mashina dvigalas vo" -f $rs)
+            Note 'vremja svipa, znachit absoljutnye chisla plech stojat na plyvushchem polu.'
+            Note 'Sravnenie mezhdu plechami vyzhivaet (kazhdyj raund soderzhit vse plechi),'
+            Note 'sravnenie s ljubym izmereniem drugogo dnja - net.'
+        } else {
+            Note ("{0:N1} procenta mezhdu raundami - v predelah shuma, mashina stojala rovno" -f $rs)
+        }
     }
 } finally {
     if ($ownsLock) { Free-Machine; Note 'mashina osvobozhdena' }

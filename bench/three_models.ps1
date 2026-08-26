@@ -45,6 +45,32 @@ function Startable($exe) {
     return "binarnik ne startuet ($why)"
 }
 
+# Zhdat, poka pamjat ne ustoitsja, a ne fiksirovannye sekundy.
+#
+# Otkuda eto vzjalos. Tri povtora odnogo i togo zhe plecha dali 5.61 / 5.71 / 7.37 tok/s pri tihoj
+# mashine. Uliku dala faza prefila, kotoraja upiraetsja v schjot, a ne v pamjat: 116.80 ms na tokjen
+# v povtore 2 protiv 31.71 v povtore 3, to est v 3.7 raza. Takaja raznica na schjotnoj faze znachit
+# tolko odno - processu ne dostalis jadra.
+#
+# Zanimala ih ne chuzhaja rabota, a sama sistema: predydushchij progon osvobodil 16 GB, i Windows
+# obnuljaet eti stranicy fonovym potokom. Pjatnadcati sekund pauzy na 16 GB ne hvataet, i sledujushchij
+# povtor startuet v konkurencii s uborkoj za predydushchim.
+#
+# Poetomu pauza mezhdu povtorami ne vremennaja, a po sostojaniju: zhdjom, poka svobodnaja pamjat
+# perestanet rasti. Dva podrjad zamera v predelah 200 MB drug ot druga - znachit uborka zakonchilas.
+function Settle {
+    param([int]$MaxSec = 180, [int]$TolMB = 200)
+    $prev = -1
+    $t0 = Get-Date
+    while (((Get-Date) - $t0).TotalSeconds -lt $MaxSec) {
+        Start-Sleep -Seconds 5
+        $free = [int]((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1KB)  # MB
+        if ($prev -ge 0 -and [math]::Abs($free - $prev) -le $TolMB) { return $free }
+        $prev = $free
+    }
+    return $prev
+}
+
 function Arm($label, $model, [string[]]$extra, $limitSec) {
     if (-not (Test-Path -LiteralPath $model)) { Note ("{0,-34} net fajla" -f $label); return }
     $vals = @(); $why = ''
@@ -72,7 +98,7 @@ function Arm($label, $model, [string[]]$extra, $limitSec) {
             $bad = $out | Select-String -Pattern 'unknown model|not supported|failed to|error loading|abort' | Select-Object -First 1
             if ($bad) { $why = $bad.Line.Trim() }
         }
-        Start-Sleep -Seconds 15
+        $null = Settle
     }
     if ($vals.Count -eq 0) { Note ("{0,-34} NE POSHLO: {1}" -f $label, $why); return }
     # One surviving replicate reports a 0.0% spread and looks like the cleanest arm in the table.

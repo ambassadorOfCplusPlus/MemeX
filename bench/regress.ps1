@@ -24,6 +24,32 @@ $M   = 'D:\Qwen3-Coder-30B-A3B-mx1.gguf'
 function Say($m) { ("`n[{0}] ===== {1}" -f (Get-Date -Format 'HH:mm'), $m) | Tee-Object -FilePath $LOG -Append }
 function Note($m) { ("  " + $m) | Tee-Object -FilePath $LOG -Append }
 
+# Zhdat, poka pamjat ne ustoitsja, a ne fiksirovannye sekundy.
+#
+# Otkuda eto vzjalos. Tri povtora odnogo i togo zhe plecha dali 5.61 / 5.71 / 7.37 tok/s pri tihoj
+# mashine. Uliku dala faza prefila, kotoraja upiraetsja v schjot, a ne v pamjat: 116.80 ms na tokjen
+# v povtore 2 protiv 31.71 v povtore 3, to est v 3.7 raza. Takaja raznica na schjotnoj faze znachit
+# tolko odno - processu ne dostalis jadra.
+#
+# Zanimala ih ne chuzhaja rabota, a sama sistema: predydushchij progon osvobodil 16 GB, i Windows
+# obnuljaet eti stranicy fonovym potokom. Pjatnadcati sekund pauzy na 16 GB ne hvataet, i sledujushchij
+# povtor startuet v konkurencii s uborkoj za predydushchim.
+#
+# Poetomu pauza mezhdu povtorami ne vremennaja, a po sostojaniju: zhdjom, poka svobodnaja pamjat
+# perestanet rasti. Dva podrjad zamera v predelah 200 MB drug ot druga - znachit uborka zakonchilas.
+function Settle {
+    param([int]$MaxSec = 180, [int]$TolMB = 200)
+    $prev = -1
+    $t0 = Get-Date
+    while (((Get-Date) - $t0).TotalSeconds -lt $MaxSec) {
+        Start-Sleep -Seconds 5
+        $free = [int]((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1KB)  # MB
+        if ($prev -ge 0 -and [math]::Abs($free - $prev) -le $TolMB) { return $free }
+        $prev = $free
+    }
+    return $prev
+}
+
 function Arm($label, $ngen, [string[]]$extra) {
     $vals = @()
     for ($r = 1; $r -le 3; $r++) {
@@ -37,7 +63,7 @@ function Arm($label, $ngen, [string[]]$extra) {
         $out = @(); if (Test-Path $so) { $out += Get-Content $so }; if (Test-Path "$so.err") { $out += Get-Content "$so.err" }
         $h = $out | Select-String -Pattern '^(main|llama_print_timings):\s+eval time' | Select-Object -First 1
         if ($h -and $h.Line -match '([\d.]+) tokens per second') { $vals += [double]$Matches[1] }
-        Start-Sleep -Seconds 15
+        $null = Settle
     }
     if ($vals.Count -lt 2) { Note ("{0,-28} menshe dvuh povtorov - ne rezultat" -f $label); return }
     $mean = ($vals | Measure-Object -Average).Average
