@@ -641,3 +641,41 @@ offload spends VRAM on experts it will never read, and that is why more VRAM doe
 
 So the threshold is not really about card size. It is about the point at which there is enough room
 for the static half, after which you stop paying for bytes nobody reads.
+
+## Gemma 4 i Qwen3.6 v nashem dvizhke: chto sdelano i chto vyjasnilos
+
+Both graphs are built - per-layer HParams (LayerGeom: ATTN / ATTN_SWA / DELTA_NET), widened Graph
+and Cache, build_gemma4_step and build_qwen35_step, delta-net state in the Generator, and
+--decode-check for the carried state. Not compiled yet: the machine is held by measurements.
+
+**The find that matters beyond these two models: ggml_mul_multi_add.** The MoE tail written the
+obvious way - multiply by routing weights, add eight slices, fold Gemma's ffn_down_exps.scale by
+hand through repeat_4d/get_rows/mul - is 11 nodes. The fused op is 1, bit-identical, forming
+s = w[j]*scale[id[j]] once per slot and accumulating from slot zero upward. Across Gemma's 30
+layers that is ~300 nodes, about 8.2 ms per token at 27.24 us.
+
+And it is a correctness improvement, not only a speed one: cparams.fused_mmad defaults to true, so
+the llama_decode we compare against already takes that path. A comparison against a route the
+reference does not take proves less than it looks.
+
+**Node counts as built are far above what the card plan assumes.** Gemma ~39 per layer (~1170
+total), Qwen3.6 ~38 on delta-net layers and ~40 on attention (~1530). Our own qwen3moe layer is 43.
+The plan is priced at 15 device-side nodes per layer. Those are not the same quantity - most nodes
+will stay on the CPU - but the device-side split has never been counted, and at 27.24 us the
+difference between 15 and 39 is 31 ms per token on Gemma alone.
+
+What an aggressively fused MoE layer can be, counting the irreducible work: norm (fused rms+mul),
+qkv (1 if fused, else 3), rope q and k (2), kq / softmax / kqv (3), output projection (1), residual
+(1), ffn norm (1), router matmul + softmax + top_k (3), up/gate/down as mul_mat_id (3, or 1 fused),
+mul_multi_add (1), residual (1). That is 15-18, so the plan's 15 is reachable but only with the
+fusions actually taken. We are at 43.
+
+**Dead code found in ggml:** the plain-C fallback for GGML_OP_DELTA_NET indexes g and beta as
+[head][token]; the iqk kernel that actually runs indexes them [token][head], which is what the
+permuted views produce. The fallback is the transpose of the real thing and never executes on this
+machine. Also, q and k are L2-normalised in the graph and the iqk kernel relies on that - it takes
+a bare dot product with no renormalisation, unlike the fallback.
+
+**Interface change other code must know about:** Cache::k[il] and Cache::v[il] are now null on
+layers with no KV cache - 30 of Qwen3.6's 40 - and Cache::bytes() is a per-layer sum rather than
+n_layer * 2 * n_ctx * d_kv * 2. Any memory accounting that assumed uniform layers is wrong now.
