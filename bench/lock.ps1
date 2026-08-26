@@ -1,0 +1,124 @@
+# One owner of the machine at a time. Dot-source this and call Take-Machine / Free-Machine.
+#
+# Why a lock and not another resource check. Over one day this project lost roughly five hours to
+# four different collisions, and each fix caught the previous case and missed the next:
+#
+#   * "no model process running"      -> two waiting scripts saw the same silence and started together
+#   * "no compiler running"           -> idle MSBuild node-reuse daemons froze the queue for 2.5 hours
+#   * "no sibling bench script"       -> a child deadlocked against its own parent orchestrator
+#   * "at least 18 GB free"           -> a 7 GB and a 15 GB process each passed the gate alone
+#
+# The last one is the giveaway: every resource test asks "is there room for me", and two honest
+# answers can both be yes. Ownership is not a resource question. A lock asks "does anyone else
+# hold the right", which has exactly one answer.
+#
+# The file holds the PID, so a holder that died - a crash, a kill, a power cut, all of which
+# happened today - is detected and its lock broken rather than blocking everything forever.
+
+$script:MEMEX_LOCK = 'D:\MemeX\results\.machine.lock'
+$script:MEMEX_HELD  = $false
+
+function Test-LockAlive {
+    if (-not (Test-Path -LiteralPath $script:MEMEX_LOCK)) { return $false }
+    try {
+        $raw = Get-Content -LiteralPath $script:MEMEX_LOCK -Raw -ErrorAction Stop
+        $pidText = ($raw -split '\|')[0]
+        $holder = 0
+        if (-not [int]::TryParse($pidText.Trim(), [ref]$holder)) { return $false }
+        if ($holder -eq $PID) { return $false }          # our own lock is not a competitor
+        return [bool](Get-Process -Id $holder -ErrorAction SilentlyContinue)
+    } catch { return $false }                            # unreadable or half-written: treat as stale
+}
+
+# Returns $true once the machine is ours. $TimeoutMin bounds the wait so a caller can report
+# "did not get the machine" rather than hanging - a hang cost thirteen hours here once.
+function Take-Machine {
+    param([string]$Who = 'unknown', [int]$TimeoutMin = 480, [int]$MinFreeGB = 0)
+    $deadline = (Get-Date).AddMinutes($TimeoutMin)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-LockAlive) { Start-Sleep -Seconds 30; continue }
+        # Stale or absent: claim it. CreateNew makes the claim atomic between two racers.
+        try {
+            $fs = [IO.File]::Open($script:MEMEX_LOCK, 'Create', 'Write', 'None')
+            $bytes = [Text.Encoding]::UTF8.GetBytes("$PID|$Who|" + (Get-Date -Format 'HH:mm:ss'))
+            $fs.Write($bytes, 0, $bytes.Length); $fs.Close()
+        } catch { Start-Sleep -Seconds 15; continue }     # someone else won the race
+        # Memory is still worth checking, but now as a precondition rather than as the gate: the
+        # lock decides who runs, this decides whether running is worth anything.
+        if ($MinFreeGB -gt 0) {
+            $free = (Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1MB
+            if ($free -lt $MinFreeGB) {
+                Remove-Item -LiteralPath $script:MEMEX_LOCK -Force -ErrorAction SilentlyContinue
+                Start-Sleep -Seconds 60
+                continue
+            }
+        }
+        if ((Test-ForeignModel) -or (Test-ForeignBuild)) {
+            Remove-Item -LiteralPath $script:MEMEX_LOCK -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 45
+            continue
+        }
+        $script:MEMEX_HELD = $true
+        return $true
+    }
+    return $false
+}
+
+function Free-Machine {
+    if (-not $script:MEMEX_HELD) { return }
+    try {
+        $raw = Get-Content -LiteralPath $script:MEMEX_LOCK -Raw -ErrorAction Stop
+        if (($raw -split '\|')[0].Trim() -eq "$PID") {
+            Remove-Item -LiteralPath $script:MEMEX_LOCK -Force -ErrorAction SilentlyContinue
+        }
+    } catch { }
+    $script:MEMEX_HELD = $false
+}
+
+function Get-LockHolder {
+    if (-not (Test-Path -LiteralPath $script:MEMEX_LOCK)) { return 'svoboden' }
+    try { return (Get-Content -LiteralPath $script:MEMEX_LOCK -Raw).Trim() } catch { return 'nechitaem' }
+}
+
+# The lock is necessary and not sufficient, because it only binds the scripts that call it.
+# Three scripts in this queue predate it - spec_study, resume_all, master - and one of them was
+# midway through a measurement, holding 12.6 GB, when a lock-aware script claimed the machine and
+# was about to start a run on top of it. Ownership answers "does anyone else hold the right"; it
+# cannot answer "is anyone else already working without asking". Until every script takes the lock,
+# both questions have to be asked, so a claim also requires that no model process is running.
+#
+# This is deliberately blunt: at claim time we have not started anything ourselves, so any model
+# process at all is someone else's.
+# A compile is foreign work too, and it is the participant nobody enrolled. A reference arm was
+# measured at 9.95 tok/s with a 34% spread while cl.exe burned cores for a subagent's build - the
+# lock was held correctly and the machine was still not quiet.
+#
+# Judged by CPU-time delta rather than by existence, because judging compilers by existence is the
+# mistake that froze this queue for 2.5 hours: MSBuild keeps node-reuse daemons alive between
+# builds, and they sit there consuming nothing. A process that has not accumulated CPU over a
+# sampling interval is not compiling, whatever its name is.
+function Test-ForeignBuild {
+    param([int]$SampleMs = 1500, [double]$MinCpuSec = 0.4)
+    $names = 'cl','MSBuild','cmake','ninja','link','lib','rc','cl_arm64'
+    $before = @{}
+    foreach ($pr in Get-Process -Name $names -ErrorAction SilentlyContinue) {
+        try { $before[$pr.Id] = $pr.CPU } catch { }
+    }
+    if ($before.Count -eq 0) { return $false }
+    Start-Sleep -Milliseconds $SampleMs
+    foreach ($pr in Get-Process -Name $names -ErrorAction SilentlyContinue) {
+        try {
+            if ($before.ContainsKey($pr.Id) -and ($pr.CPU - $before[$pr.Id]) -ge $MinCpuSec) { return $true }
+        } catch { }
+    }
+    return $false
+}
+
+function Test-ForeignModel {
+    foreach ($n in @('llama-cli','llama-perplexity','llama-quantize','llama-imatrix','llama-moe-trace',
+                     'llama-bench','llama-memex-fwd','llama-memex-test','llama-memex-kv',
+                     'memex-test','memex-qerr')) {
+        if (Get-Process -Name $n -ErrorAction SilentlyContinue) { return $true }
+    }
+    return $false
+}
