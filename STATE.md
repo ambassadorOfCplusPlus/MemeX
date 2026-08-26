@@ -581,3 +581,57 @@ cost, which is the rendezvous term measured independently.
 
 Until that slope is known, every tok/s figure in the section above is conditional on an assumption
 I have now shown was picked out of the air.
+
+## Cena dispatcha izmerena: 27.24 mks, i chto iz etogo sleduet
+
+The hope was 5 us. Measured (examples/memex-vkdisp, sweep over node count, fitted slope):
+
+    zavisimaja cepochka   27.24 mks/uzel, svobodnyj chlen 17.4 mks
+    nezavisimye uzly      26.83 mks/uzel, svobodnyj chlen 21.2 mks
+    otnoshenie            1.02x
+
+Independent nodes cost the same as a dependent chain, so nothing is being serialised by the data
+dependency - the launch itself is the cost, and parallelism does not help. Only fewer nodes help.
+The slope is essentially the 31 us round-trip figure, so dispatches inside one command buffer do
+NOT pipeline in any way that matters here.
+
+The intercept is 17.4 us, not 177. That does not contradict the rendezvous measurement, it locates
+it: 177 us is host-side coordination - worker thread wakeup, mutex, condition variable - and only
+17.4 us of it is the submit and fence. Worth knowing, because the two are reduced by different
+means: fewer submits helps the 17.4, a leaner handoff helps the 177.
+
+Effect on the plan: 15 card-side nodes per layer x 48 layers x 27.24 us = 19.6 ms per token on
+launches alone, against the 19.3 ms the plan assumed with 13 nodes at 31 us. The estimate survives
+by coincidence - two wrong numbers cancelling - but it is now measured rather than guessed.
+
+That makes launches the largest single term, 19.6 ms of about 41. Fusing the per-layer graph from
+15 nodes to 8 saves 9.1 ms and takes the 30B from 24 to 31 tok/s. That is a bigger lever than any
+amount of extra VRAM for experts, and it is now the first job.
+
+## Gde nasha shema obgonjaet vygruzku celyh sloev
+
+    kontekst 2048, baza 13.3 tok/s        kontekst 16384, baza 7.8 tok/s
+    VRAM    celye sloi   nashe            VRAM    celye sloi   nashe
+    2000    13.2         19.5             2000     8.0         ne vlezaet
+    3980    13.1         24.1             3980     8.4         18.0
+    8000    12.9         23.8             8000     9.0         19.2
+    16000   12.5         23.6             16000   10.8         19.1
+
+    perelom: 1000 MB = 6.5% modeli pri 2k,  2350 MB = 15.2% pri 16k
+
+The threshold exists and it is low - we are past it with room to spare at 3980 MB, which is 26% of
+the model. But the flatness of the whole-layer column is the real finding: it barely beats the CPU
+baseline at any VRAM size, and at short context it is actually slightly worse.
+
+The reason is one number. A layer offloaded whole must hold all 128 of its experts, because the
+router may pick any of them, and it reads 8. Bytes read per token per byte resident:
+
+    celyj sloj                317 MB rezidentno, 29.7 MB chitaetsja   0.09
+    nashi populjarnye eksperty                                        0.27
+    nasha statika             802 MB rezidentno, 802 MB chitaetsja    1.00
+
+Static is the only thing that scores 1.0: every resident byte is read on every token. Whole-layer
+offload spends VRAM on experts it will never read, and that is why more VRAM does not help it.
+
+So the threshold is not really about card size. It is about the point at which there is enough room
+for the static half, after which you stop paying for bytes nobody reads.
