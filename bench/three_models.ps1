@@ -21,6 +21,30 @@ $P   = 'D:\MemeX\results\prompt_short.txt'
 function Say($m) { ("`n[{0}] ===== {1}" -f (Get-Date -Format 'HH:mm'), $m) | Tee-Object -FilePath $LOG -Append }
 function Note($m) { ("  " + $m) | Tee-Object -FilePath $LOG -Append }
 
+# Zapuskaemost proverjaetsja do zamerov, a ne vyvoditsja iz ego rezultatov.
+#
+# Vsja tablica tolko chto vyshla pustoj: kazhdoe plecho otchitalos "NE POSHLO" s pustym
+# soobshcheniem, a prichina byla v tom, chto v build/bin/Release lezhala ggml.dll razmerom 67 KB ot
+# 26 ijunja vmesto nastojashchej na 31 MB - parallelnaja sborka ostavila nesoglasovannoe derevo.
+# llama-cli padal s kodom -1073741511 (tochka vhoda ne najdena) do togo, kak chto-libo napechatat,
+# poetomu ni odin iz shablonov oshibok ne sovpal.
+#
+# Eto uzhe vtoroj raz: odnazhdy ggml.dll prosto ischezla, CMake schital cel gotovoj, i noch byla
+# poterjana na progony, padavshie bez soobshchenija. Otlichie "ne zapustilos" ot "ne izmerilos"
+# dolzhno delatsja odnoj proverkoj v nachale, a ne razbором pustyh logov potom.
+function Startable($exe) {
+    if (-not (Test-Path -LiteralPath $exe)) { return "net fajla: $exe" }
+    $null = & $exe --version 2>&1
+    $c = $LASTEXITCODE
+    if ($c -eq 0) { return $null }
+    $why = switch ($c) {
+        -1073741511 { 'tochka vhoda ne najdena - DLL ne sootvetstvuet exe, nuzhna peresborka' }
+        -1073741515 { 'DLL ne najdena' }
+        default     { "kod vyhoda $c" }
+    }
+    return "binarnik ne startuet ($why)"
+}
+
 function Arm($label, $model, [string[]]$extra, $limitSec) {
     if (-not (Test-Path -LiteralPath $model)) { Note ("{0,-34} net fajla" -f $label); return }
     $vals = @(); $why = ''
@@ -69,6 +93,8 @@ function Arm($label, $model, [string[]]$extra, $limitSec) {
 }
 
 ("`n`n######## tri modeli " + (Get-Date)) | Add-Content $LOG
+$bad = Startable ("$BIN" + [char]92 + "llama-cli.exe")
+if ($bad) { Note $bad; exit 1 }
 if (-not (Take-Machine -Who 'three_models' -TimeoutMin 600 -MinFreeGB 16)) { Note 'mashinu ne poluchili'; exit 1 }
 Note ('vladeem: ' + (Get-LockHolder))
 try {
