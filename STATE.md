@@ -731,3 +731,39 @@ leaves the card's 16 MB cache. So fuse the small stuff and leave the big matmuls
 **Correction to my own reading:** the 17.4 us intercept looked small because the submit was inside
 the slope, not outside it. The real floor for a graph_compute ending in a fence is about 59 us with
 a single node in it - much closer to the independently measured 177 us rendezvous than 17 us was.
+
+## Granica prohodit po sloju, a ne po uzlam - i pochemu eto ne ochevidno
+
+Counting the graph gave a reassuring number and a dangerous one in the same breath.
+
+Reassuring: of Gemma's 39 nodes per layer, only **11 are device candidates** - four attention
+projections, two KV-cache matmuls, the dense FFN's fused up-gate and its down, the router, and the
+two expert ops. The card plan's budget of 15 device-side nodes per layer is not blown; the 39 was a
+host-side total. Model totals: Gemma 1176 nodes of which 330 are weight- or cache-bound, Qwen3.6
+1604 of which 550.
+
+Dangerous: those 11 are **interleaved** with the other 28. Cutting the graph wherever the device
+nodes are would cross the CPU/GPU boundary about twenty times per layer.
+
+A crossing costs 177 us of host-side coordination, measured independently of any GPU work. So:
+
+    po uzlam        ~20 peresechenij/sloj x 48 = 960  x 177 us = 170 ms   absurd
+    po blokam        ~4                    x 48 = 192  x 177 us =  34 ms   dorozhe vsego vyigrysha
+    po sloju            1                  x 48 =  48  x 177 us = 8.5 ms   bjudzhet plana
+
+Which means the 28 host-side nodes - norms, ropes, softmaxes, almost no bytes in them - must run on
+the card as well. On the device they cost about 3 us each, so 28 x 3 x 48 = 4.0 ms for Gemma,
+against the 26 ms of extra crossings that keeping them host-side would cost.
+
+The lesson is the one worth carrying: **cheap in bytes is not cheap in place.** These nodes were
+never going to be worth moving on their own merits - they move almost nothing - but leaving them
+behind creates a boundary, and the boundary costs forty times what the work does. The unit of
+placement is not the operation, it is the cut.
+
+So the boundary is: the card runs the entire layer graph except the CPU's slice of the experts. One
+handoff per layer. The 11-versus-28 split stops mattering, which is the point.
+
+Consequence to design in now rather than discover later: Qwen3.6's delta-net layers carry recurrent
+state that ggml_delta_net reads and writes - 2.20 MB per layer, 65.9 MB for all thirty. If those
+layers run on the card, the state lives there and is updated in place. It must never be mirrored to
+the host per token.
