@@ -846,3 +846,21 @@ with nothing behind it. The flag earned its keep on this table more than anywher
 What the table would have said if it had held: the byte-budget ceilings are 14.7, 9.8 and 8.9 tok/s
 for the 30B, Gemma and the 35B respectively. Any measured value materially below those is either
 contention or a real inefficiency, and until the machine is quiet the two cannot be told apart.
+
+## Plan, zadannyj polzovatelem 26 avgusta pozdno vecherom
+
+  1. Coder-Next: zapustit v 3 bitah, zatem v 4, i optimizirovat
+  2. Predskazanie ekspertov: dообuchit marshrutizator - kesh po tokenam i to, kakie eksperty
+     ponadobjatsja na distancii, a ne tolko na sledujushchem shage
+  3. DeepSeek - reshenie posle, i osnovanie nazvano verno: malo aktivnyh parametrov pri bolshom
+     chisle postojannyh, to est imenno ta forma, pod kotoruju nasha shema i stroitsja
+
+Punkt 2 - eto prjamoj udar v izmerennyj razryv. Pri 16 ekspertah na sloj obychnaja politika berjot
+76.2% popadanij, orakul so znaniem sledujushchih chetyrjoh tokenov - 91.0%. Pjatnadcat punktov ne v
+emkosti i ne v nepredskazuemosti nagruzki, a v kachestve predskazatelja.
+
+Chto dlja etogo nuzhno i chego net: v trasse lezhat tolko sami vybory top-8, bez raspredelenij.
+Rang po verojatnostnoj masse - imenno ta versija idei, kotoraja dolzhna razryv zakryvat, potomu chto
+ekspert, stabilno zanimajushchij devjatoe mesto po verojatnosti, schjotchika popadanij ne nabiraet
+nikogda, a vhodit v top-8 pervym. Zapis trassy s MOE_TRACE_PROBS postavlena v ochered; bez nejo ni
+obuchit predskazatel, ni proverit ego nelzja.
