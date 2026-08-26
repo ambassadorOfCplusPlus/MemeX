@@ -21,7 +21,11 @@ from traffic import read, TN, BLK
 import os
 
 HOST, DEV = 24.8, 131.0
-RENDEZVOUS_US, DISPATCH_US = 177.0, 31.0
+RENDEZVOUS_US, DISPATCH_US = 177.0, 2.99   # pakenyj naklon, ne 27.24
+# 27.24 us/node was measured with a synthetic graph of tiny non-matmul ops, which makes the Vulkan
+# backend submit per node. A real model graph contains matmuls and submits far less often; the
+# marginal cost of a node inside one command buffer is 2.99 us. The difference - 17.3 ms over 720
+# nodes - is entirely submit cost, and it belongs to the submit count, not the node count.
 VRAM_MB = 3980.0
 MB = 1024.0 ** 2
 

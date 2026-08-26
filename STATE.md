@@ -679,3 +679,55 @@ a bare dot product with no renormalisation, unlike the fallback.
 **Interface change other code must know about:** Cache::k[il] and Cache::v[il] are now null on
 layers with no KV cache - 30 of Qwen3.6's 40 - and Cache::bytes() is a per-layer sum rather than
 n_layer * 2 * n_ctx * d_kv * 2. Any memory accounting that assumed uniform layers is wrong now.
+
+## Cena raboty s kartoj, razlozhennaja: submit, ustrojstvo, zapis komand
+
+Two independent methods, agreeing:
+
+    vkQueueSubmit          24.1 mks/uzel    raznost naklonov paketnogo i pouzlovogo rezhimov
+    ispolnenie na GPU      2.2-3.5          metki GGML_VK_PERF_LOGGER, podgonka mean(N)=D+gap/N
+    zapis komand na hoste  0.06-0.93        naklon processornogo vremeni processa po N
+
+So both routes we were weighing are closed by measurement rather than opinion. An own command
+buffer would target host recording, measured at under a microsecond per node. A persistent kernel
+would target device execution, measured at 3 us per node out of a 41 ms token. Neither pays.
+
+**The 27.24 us figure was an artefact of the probe, and the cause is proven.** ggml's Vulkan backend
+picks submit points by `mul_mat_bytes >= total_mat_mul_bytes / 40` (ggml-vulkan.cpp:10353). The
+probe's graph was a chain of adds with no matmul at all, so the threshold was zero and `0 >= 0` held
+at every node: it timed 64 graphs of one node each, not one graph of 64. The proof is two graphs
+differing by one row of an 8-element matrix - a 32-byte src[0] gives 32/40 = 0 and submits per node
+(27.05 us/node), a 64-byte one gives 1 and batches (3.27 us/node).
+
+Worth keeping as a lesson in its own right: the synthetic probe was built to isolate one cost and
+its very simplicity - no matmul, because matmuls would have added bandwidth to the thing being
+timed - is what triggered a different code path from the real workload. Removing everything
+irrelevant removed the thing that made the measurement representative.
+
+**Where the real cost is: submit granularity, not node count.** The same threshold means a graph of
+N matmuls gets a submit every ceil(N/40) nodes - which is every node for any N up to forty:
+
+    matumnozhenij   vsego mks   mks/uzel
+             8         185.4      23.17
+            15         244.6      16.30
+            45         322.4       7.16
+           240         803.8       3.35
+
+A 15-node layer graph costs 245 us. Over 48 layers that is 11.7 ms per token. The same 720 nodes
+handed over as one graph cost about 2 ms. So the card module must submit one graph per token, not
+one per layer - and the current fork/join design does exactly the wrong thing, calling
+graph_compute per layer. That is a 9.5 ms design constraint, and it was invisible until now.
+
+**Nothing overlaps on the device, ever.** ggml_vk_sync_buffers (ggml-vulkan.cpp:1728) is a full
+pipeline barrier over all shader and transfer reads and writes, and every op wrapper calls it before
+its dispatch unconditionally, without checking whether the tensors overlap. Chain versus fan-out in
+batched mode measures 1.003x. Any design that assumed two independent dispatches could run together
+is wrong.
+
+**Fusing is not unconditionally good.** Below 64 KiB per node it wins 2-3x; above about 4 MiB it
+loses - 32 chained 1-MiB adds beat one 32-MiB add by 1.8x, because the fused version's working set
+leaves the card's 16 MB cache. So fuse the small stuff and leave the big matmuls alone.
+
+**Correction to my own reading:** the 17.4 us intercept looked small because the submit was inside
+the slope, not outside it. The real floor for a graph_compute ending in a fence is about 59 us with
+a single node in it - much closer to the independently measured 177 us rendezvous than 17 us was.

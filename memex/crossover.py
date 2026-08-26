@@ -22,7 +22,11 @@
 # 47% of the traffic and needs no experts resident at all.
 
 HOST, DEV = 24.8, 131.0
-NODE_US, SUBMIT_US, RV_US = 27.24, 17.4, 177.0
+NODE_US, SUBMIT_US, RV_US = 2.99, 17.4, 177.0   # pakenyj naklon, ne 27.24
+# 27.24 us/node was measured with a synthetic graph of tiny non-matmul ops, which makes the Vulkan
+# backend submit per node. A real model graph contains matmuls and submits far less often; the
+# marginal cost of a node inside one command buffer is 2.99 us. The difference - 17.3 ms over 720
+# nodes - is entirely submit cost, and it belongs to the submit count, not the node count.
 NODES_LAYER_ALL = 43      # counted from build_step in memex-fwd.cpp
 NODES_LAYER_OURS = 15     # attention + head/router + the card's expert slice
 MB = 1.0
