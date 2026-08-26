@@ -154,6 +154,16 @@ function Summ($name, $vals) {
 # deadlock the header of lock.ps1 lists as one of the four collisions that cost this project a day.
 $reps     = if ($args.Count -gt 0) { [int]$args[0] } else { 3 }
 $ownsLock = -not ($args.Count -gt 1 -and $args[1] -eq 'external')
+
+# Drop the divisor-8 arm on demand, rather than a replicate.
+#
+# The two are not interchangeable when the lock arrives late. An arm without at least two replicates
+# reports a 0.0% spread, which is the absence of the noise check rather than a quiet machine, so
+# cutting rounds to fit five arms into the time left produces five numbers none of which is a
+# result. Cutting an arm keeps the check intact on the ones that remain. B is the one to cut because
+# it is the interior point of the divisor scale: A is upstream, C and D are the ends, E is the
+# separate tail question. Losing B costs shape, not the comparison.
+$dropB8 = ($args -contains 'no8')
 if ($ownsLock) {
     if (-not (Take-Machine -Who 'submit-policy' -TimeoutMin 120 -MinFreeGB 16)) { Note 'mashinu ne poluchili'; exit 1 }
 } else {
@@ -163,11 +173,13 @@ Note ('vladeem: ' + (Get-LockHolder))
 try {
     $arms = @(
         @{ tag = 'A40'; label = 'A. divisor 40 (upstream)'; div = 40; tail = 1 },
-        @{ tag = 'B8';  label = 'B. divisor 8';             div = 8;  tail = 1 },
         @{ tag = 'C1';  label = 'C. divisor 1';             div = 1;  tail = 1 },
         @{ tag = 'D0';  label = 'D. divisor 0, bajty off';  div = 0;  tail = 1 },
         @{ tag = 'E0T'; label = 'E. divisor 0, bez tail';   div = 0;  tail = 0 }
     )
+    if (-not $dropB8) {
+        $arms = @($arms[0]) + @(@{ tag = 'B8'; label = 'B. divisor 8'; div = 8; tail = 1 }) + @($arms[1..($arms.Count-1)])
+    }
     foreach ($arm in $arms) { $arm.gen = @(); $arm.pre = @(); $arm.subper = @(); $arm.vkms = @(); $arm.nodesper = @() }
 
     # Per-round means across all arms. Every round contains every arm exactly once, so these are
