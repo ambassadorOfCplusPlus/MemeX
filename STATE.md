@@ -864,3 +864,34 @@ Rang po verojatnostnoj masse - imenno ta versija idei, kotoraja dolzhna razryv z
 ekspert, stabilno zanimajushchij devjatoe mesto po verojatnosti, schjotchika popadanij ne nabiraet
 nikogda, a vhodit v top-8 pervym. Zapis trassy s MOE_TRACE_PROBS postavlena v ochered; bez nejo ni
 obuchit predskazatel, ni proverit ego nelzja.
+
+## Dva istochnika predskazanija proverены i zakryty
+
+Measured on the real router trace, 47 layers, 2190 tokens, top-8 of 128.
+
+**The previous layer, within the same token: no signal at all.** Layer L's choices predict layer
+L+1's at **6.0%** against a 6.25% random floor. The same layer one token earlier predicts at 48.2%.
+
+This closes the most valuable idea available, so it is worth being precise about what was lost.
+Every other predictor forecasts across tokens, so the earliest it can act is one token ahead. If a
+layer had predicted the next layer, the prefetch could have started mid-token with 47 layers of
+runway - a scheduling problem instead of a prediction problem. It does not.
+
+But the negative result explains the shape of the whole task: the signal lives **inside a layer
+across time**, not across layers. There is no global topic state propagating through the model;
+each router decides on its own layer's features. Which is exactly why a predictor must be
+per-model, and within a model per-layer - an expert index means a different thing in every layer,
+and pooling them does not add data, it destroys the structure.
+
+**Co-occurrence exists but is thin.** Experts travel in groups at a lift of 1.33 over independence.
+Folding that into the frequency score buys +0.4 to +1.0 points:
+
+       C    chastota   + sovmestnost    orakul
+       8       54.2%          54.4%      65.3%
+      16       76.2%          76.6%      91.0%
+      32       91.8%          92.8%     100.0%
+
+So the fifteen-point gap at C=16 survives both. What remains is ranking by the router's own
+probability mass - the one version of the idea that needs the distributions, because an expert
+sitting ninth by probability never earns a count and is exactly the one about to enter the top-8.
+The trace recording is queued; nothing can be trained or checked without it.
