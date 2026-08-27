@@ -1686,3 +1686,38 @@ A ne izmereno i krupno:
 
 Sledujushchij shag - ne graf i ne barjer, a **pochemu podkachka 2.51 MB stoit 1.89 ms vmesto
 0.64**, i mozhno li vynesti ejo s togo potoka, na kotorom CPU stoit na dzhojne.
+
+### Pochemu podkachka 2.51 MB stoit 1.89 ms: pakety po ODNOJ, i eto vidno v vyvode
+
+Vyvod progona nazyvaet mehanizm sam, esli postavit dva ego chisla rjadom:
+
+    barjery (fence): podkachka 1902 (paketov 1902, vne paketa 0 promoushenov)
+    podkachek 1902, 4.77 GB
+
+**1902 paketa na 1902 podkachki - to est razmer paketa vsegda odin.** Mashinerija paketirovanija
+napisana ("odin submit i odin fence na neskolko matric vmesto trjoh") i rabotaet, no vyzyvajushchij
+cikl svodit ejo k minimumu: worker_loop (gpu_experts.cpp:948) beryot iz ocheredi ODNU podkachku i
+oborachivaet ejo v `batch_begin(); upload(...); batch_end();`, prichjom `batch_end` zhdjot fence.
+Znachit kazhdaja podkachka platit svoj submit i svoj zabor, skolko by ih ni stojalo v ocheredi.
+
+Vnutri etih 1.89 ms:
+
+    read_plain: mmap -> zakreplennaja promezhutochnaja pamjat   2.51 MB pri 24.8 GB/s   0.10 ms
+    tri zapisannye kopii -> videopamjat po PCIe                2.51 MB pri 3.94 GB/s   0.64
+    submit + fence na KAZHDUJU podkachku                                               ?
+    ----------------------------------------------------------------------------------------
+    izmereno                                                                           1.89
+
+Objasneno 0.74 iz 1.89. Ostatok 1.15 ms na podkachku - eto 7.9 ms na tokjen, i podozrevaemyj
+odin: submit s zaborom, kotoryj mog by prihoditsja na pachku, a prihoditsja na kazhduju.
+
+Predskazanie na sledujushchij shag, do ego napisanija: esli slit vse ozhidajushchie podkachki v
+odin paket (drenirovat ochered v worker_loop vmesto odnoj za prohod), pri 6.9 podkachkah na
+tokjen paketov stanet 1-2 vmesto 6.9, i esli ostatok 1.15 ms dejstvitelno submit s zaborom, to
+
+    podkachki na potoke karty   13.04 -> 5.5-6.5 ms/tokjen
+    OSTATOK dzhojna              6.29 -> 2-3 ms/tokjen
+    tokjen                      66.0 -> 60-62 ms, to est 16.1-16.5 tok/s
+
+Esli ne dvinetsja - ostatok ne v submitah, i togda merit read_plain otdelno. Chitat nado
+"podkachki zanjali potok karty" i "paketov", a ne tok/s: pervye dva u nih razbros pod procentom.
