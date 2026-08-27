@@ -1034,3 +1034,43 @@ Three defects in the harness, all of which produced confident wrong verdicts rat
     building only the example hid it.
   - engine exit 2 means "it ran and the numbers disagree" - a result. The harness read it as a
     broken step and paid for a duplicate three-minute 1100-token run.
+
+## Otmena: regressii net, i moj porog shuma byl ne o tom
+
+The regression I reported hours ago does not exist. A/B against a rebuilt upstream binary, one
+session, four arms, three replicates interleaved with alternating direction:
+
+    upstream 8337e4c, rtr    12.35  (3.6%)      upstream, mmap   11.59  (4.0%)
+    memex, rtr               12.21  (2.3%)      memex, mmap      11.20  (13.5% - not a result)
+
+Our patches cost **-1.1%** on the arm at issue, inside the noise floor. Both binaries repack the
+same 337 tensors into the same types and emit the same text.
+
+Every suspect I named was unreachable code. The new contiguous 64-byte-aligned allocation runs only
+when mmap survives, and mmap survives only when a repack filter is set - and the filter can only be
+set through `llama_model_params`, which `common/common.cpp` never touches. There is no CLI flag, so
+`llama-cli` cannot enter that branch at all. With plain `-rtr` the fork runs upstream's loop
+verbatim.
+
+### Dva vyvoda protiv menja, i vtoroj huzhe
+
+**The 14.04 baseline does not reproduce.** The same upstream commit, rebuilt today, measures 12.35.
+And one unchanged post-patch binary has scored 11.99, 13.38, 12.95 and 12.21 across sessions - an
+**11.6% range between sessions with clean spreads inside each one**. The effect I was chasing
+(7.6%) is smaller than the session-to-session variation of identical code. I spent the day comparing
+today's numbers against yesterday's and calling the difference a result.
+
+**"Repacking used to buy +34%" was arithmetically impossible and I never checked it.** Repacking
+does not change bytes read: iq4_xs->iq4_xs_r8, q8_0->q8_0_r8, q6_K->q6_k_r4 are all the same size.
+mx1 reads 1721 MB per token; at the measured 24.8 GB/s that is a 14.7 tok/s ceiling. +34% over the
+mmap arm (11.59) would need 15.5 tok/s, i.e. 28.7 GB/s - above the machine's memory bandwidth.
+Repacking's real worth here, measured on both binaries: **6.6% upstream, 9.0% ours**.
+
+So there was nothing to fix, nothing was traded away to keep selective repacking, and the
+"regression confirmed by measurement" I wrote into this file was a comparison between two different
+machine states.
+
+### Chto ostajotsja vernym
+
+The clean within-session table from 07:56 stands as a within-session table: 12.95 rtr against 12.32
+mmap, spreads 3.4% and 3.7%. What does not stand is comparing either number to 14.04.
