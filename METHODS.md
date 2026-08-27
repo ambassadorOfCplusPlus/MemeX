@@ -745,3 +745,38 @@ worth, and the assumption is that a name denotes one quantity. Before trusting a
 comparison, find every `cb(..., "thatname", ...)` in the reference and check they are the same
 thing. Where they are not, the probe has to switch with them - ours now picks the pre-residual
 tensor on layers that have `wv` and the post-residual one on layers that do not.
+
+## 57. ggml.dll disappeared a third time, and this is why nothing noticed
+
+Every run died instantly with exit **-1073741515** (STATUS_DLL_NOT_FOUND) after a build that
+reported success. `ggml.dll` and `llama.dll` were gone from `build/bin/Release`, and the same
+two files had been there twenty minutes earlier - the runs before this one loaded a 17 GB model
+with them. Windows Defender shows no detection on either file, so the cause is still unnamed;
+what is now understood is why three separate defences all failed to see it.
+
+**MSBuild prints the link line for a target it did not link.** The build log contains
+`ggml.vcxproj -> D:\...\bin\Release\ggml.dll`, which reads as "linked". It was not: the
+`ggml.exp` beside it still carried yesterday's timestamp, and so did `ggml.lib`. MSBuild decides
+freshness from `ggml.dir/Release/ggml.tlog/link.*`, not from whether the output exists, so a
+file deleted behind its back leaves the target looking current forever. Deleting those three
+`link.*` tlogs forces a relink **without recompiling anything** - the 27 object files were
+untouched, and the whole repair took twelve seconds. That is the cheap version of rule 38's
+`--clean-first`, which would have rebuilt the iqk kernels for half an hour.
+
+**Building only the example hides it.** `--target llama-memex-fwd` links against `ggml.lib` and
+`llama.lib`, not against the DLLs, so it builds and links perfectly with both DLLs missing. The
+harness now builds `ggml llama llama-memex-fwd`, in that order.
+
+**And `Test-Path` on the exe answers a question nobody asked.** The exe was present, 301 KB,
+correctly timestamped, and completely unable to start. Rule 49 already said to check the binary
+runs before collecting data; it was written down and not wired in. It is wired in now - a
+`--help` invocation whose exit code is checked and whose two known codes are named on the spot,
+costing nothing because it opens no model:
+
+    -1073741515  STATUS_DLL_NOT_FOUND        a dll is missing next to the exe
+    -1073741511  STATUS_ENTRYPOINT_NOT_FOUND dll and exe come from different builds
+
+The pattern across all three: **an artefact's existence, its build system's opinion of it, and
+its ability to run are three different facts**, and this project has now been bitten by each gap
+in turn. Only the third one is the one that matters, and it is the only one that was never being
+measured.

@@ -29,7 +29,10 @@ BLK = {0:(1,4), 1:(1,2), 29:(1,2),
        10:(256,84), 11:(256,110), 12:(256,144), 13:(256,176), 14:(256,210), 15:(256,292),
        16:(256,66), 17:(256,74), 18:(256,98), 19:(256,50), 20:(32,18), 21:(256,110),
        22:(256,82), 23:(256,136),
-       143:(256,110), 144:(256,136), 145:(256,168)}
+       143:(256,110), 144:(256,136), 145:(256,82), 152:(256,168), 156:(256,110)}
+# 152 = IQ5_KS, 156 = IQ3_KS in ik_llama's enum. Sizes from the measured bits-per-weight ladder
+# (iq5_ks 5.266 bpw, iq3_ks 3.195), not guessed: 256 * 5.266 / 8 = 168.5 bytes per block.
+# 145 corrected: it is IQ2_KS (2.195 bpw -> 82 bytes), not iq5_ks as the table previously said.
 
 
 def read(path):
@@ -72,9 +75,19 @@ def read(path):
         n = 1
         for d in dims: n *= d
         ts[i].append(n // bs * ts_ if n % bs == 0 else (n + bs - 1) // bs * ts_)
+    # A tensor whose type is not in BLK gets -1, and -1 must stop the analysis rather than flow
+    # into the sums. It flowed once: mx9 printed negative megabytes and two billion experts because
+    # tip152 was missing from the table and the -1 was quietly added up. That is exactly the failure
+    # METHODS 46 was written against - a derivation that produces a plausible-looking number instead
+    # of refusing. Negative bytes were absurd enough to catch; a merely wrong total would not have
+    # been.
     unknown = sorted({TN.get(t[2], f"tip{t[2]}") for t in ts if t[4] < 0})
     if unknown:
-        print(f"    NEIZVESTNYE TIPY, ih bajty ne uchteny: {','.join(unknown)}")
+        n_bad = sum(1 for t in ts if t[4] < 0)
+        raise ValueError(
+            f"neizvestnye tipy tenzorov: {','.join(unknown)} ({n_bad} tenzorov). "
+            f"Dobavte ih v BLK (blok elementov, bajt na blok) - schitat bez nih nelzja, "
+            f"summa budet nevernoj i pravdopodobnoj.")
     return kv, ts
 
 def analyse(path):

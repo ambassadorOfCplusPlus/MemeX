@@ -923,3 +923,114 @@ anything: the $P/$p collision that silently killed replicates 2 and 3, the fixed
 16 GB process's cleanup overlap the next replicate, and the neighbouring project's builds. Each was
 diagnosed wrongly at least once. The number 12.97 was available all along; what was missing was a
 machine quiet enough to read it.
+
+## Gemma 4 v nashem dvizhke: gde ona lomaetsja, izmereno 27 avgusta
+
+Both graphs compiled for the first time (the machine was held by measurements when they were
+written). Gemma 4 runs end to end and its answer is wrong, and the fault is now located to a
+single stage rather than described as "the numbers disagree".
+
+### Chto izmereno
+
+12-token prompt, `--probe all --decode-check 6`, `--no-repack`, t=8, per-layer comparison under
+the reference's own node names:
+
+    prefil, logity poslednego tokena   L2 414.33%   luchshij token: etalon '-', nash ' is'
+    dekod, 6 shagov                    0 iz 6 sovpali, hudshij L2 420.92% na shage 0
+
+1100-token prompt (the window-crossing arm), same binary:
+
+    prefil, logity                     L2 386.91% pri ref-ubatch 512 (token SOVPAL)
+                                       L2 264.37% pri ref-ubatch 1100 (token razoshjolsja)
+    dekod, 4 shaga                     1 iz 4 sovpali
+
+The 1100-token arm is **not** a second finding. Its first layer is already wrong, so nothing it
+says about the 1024 window can be read - which is the whole reason the short arm had to run
+first, and the reason it is worth writing down that for one evening it did not: the short arm's
+prompt reached the engine unquoted and every word after "The" was rejected as a flag, so the
+only Gemma data anyone had was the long arm's.
+
+### Gde imenno, po stadijam vnutri odnogo bloka vnimanija
+
+Probing the reference's intra-attention names on layers 0 and 1 puts the boundary between two
+adjacent nodes:
+
+    attn_norm-0        33792 znachenij   L2 0.0000%   max |d| 0.00000
+    Qcur-0             49152             L2 0.0000%   max |d| 0.00000
+    Kcur-0             24576             L2 0.0000%   max |d| 0.00000
+    Vcur-0             24576             L2 0.0000%   max |d| 0.00000
+    Qcur_normed-0      49152             L2 0.0000%   max |d| 0.00000
+    Qcur_roped-0       49152             L2 0.0000%   max |d| 0.00000
+    Kcur_normed-0      24576             L2 0.0000%   max |d| 0.00000
+    Kcur_roped-0       24576             L2 0.0000%   max |d| 0.00000
+    ---------------------------------------------------------------- vsjo vyshe BITOVO ravno
+    kqv_out-0          33792             L2 217.66%   max |d| 69.34
+    attn_out-0         33792             L2 147.95%   max |d| 471.24
+
+Bit-identical, not "close": zero to the last digit on eight consecutive tensors. That is a much
+stronger statement than a small L2 and it closes a long list of candidates outright.
+
+**Zakryto etimi nuljami** (each was a live hypothesis before the run, and several were the
+obvious first guesses):
+
+  - the per-layer geometry. Layer 0 is a windowed layer, and it reads head_dim 256, 8 kv heads
+    and rope base 1e4 - if it were falling back to the model-level 512 / 2 / 1e6, Qcur and Kcur
+    could not be bit-equal. The `LayerGeom` table is being read and used.
+  - q_norm and k_norm, both their weights and their placement relative to rope and to the
+    per-head reshape.
+  - the embedding scale sqrt(2816), attn_norm, and the whole path from token ids to Q/K/V.
+  - the raw V projection, and `Vcur = Kcur` sharing on the five layers without attn_v (layer 0
+    is not one of them, but Vcur-0 being exact rules out the projection itself).
+  - the MoE tail entirely - the fused `ffn_gate_up_exps`, GELU against SiLU, the
+    `ffn_down_exps.scale` fold - all of it is downstream of a block that is already wrong.
+  - the sliding window. Every query in a 12-token prompt sees position 0, so the 1024 boundary
+    is never approached and the windowed mask equals the causal one.
+
+**Chto ostalos**, all between the rope and the output projection: the KQ product against the
+cached K, the mask and the 1.0 softmax scale, the unweighted rms_norm on V, the cached V read,
+or the `attn_output` matmul. A second probe pass over `kq`, `kq_soft_max_ext` and
+`kqv_merged_cont` splits those four ways and is queued behind another job on the machine.
+
+### Chto uzhe ispravleno po doroge (ne po dogadke - po ishodniku forka)
+
+**Router scale.** `ffn_gate_inp.scale` as it sits in the file is not the tensor the reference's
+graph sees: `llm_scale_gate_inp_s` (llama.cpp:3805, called from :4868) walks every gemma4 layer
+at LOAD time and multiplies that vector in place by 1/sqrt(n_embd) = 1/53.066. Reading the
+weight straight out of the gguf leaves the router logits 53x too large; softmax then collapses
+onto the top expert, top-k picks the same eight (scaling is monotone) and the renormalised
+weights come out near one-hot instead of a mixture. Nothing about the shapes, the names or the
+generated text betrays it. Now applied to the router's normalised input in the graph.
+
+This one is worth generalising: **a weight can be transformed between the file and the graph,
+and reading the file correctly is then not enough.** Our engine reads tensors by name from the
+same `llama_model` the reference uses, which makes it easy to assume the values match. They do -
+until the reference edits one in place after loading. `llm_scale_gate_inp_s` is the only such
+edit for these two architectures; it was found by grepping every `GEMMA4` mention outside the
+graph builder, which is the check that should run for any new architecture.
+
+**Odno imja - dva raznyh tenzora.** See METHODS 56. `attn_out` is pre-residual on the 25 layers
+that go through `build_std_attention` and post-residual on the 5 that do not, so the probe was
+reporting the residual as an error on 25 layers of 30 - 100-500% of pure artefact sitting on top
+of whatever the real fault was.
+
+**`--ref-ubatch`.** n_ubatch defaults to 512, so an 1100-token prompt makes `llama_decode` run
+three micro-batches and capture one of them: 512 rows against our 1100, and the comparison
+correctly refuses all 120 nodes on size. Forcing one micro-batch is what makes `--probe all`
+mean anything at that length. It also shows the reference is not self-identical across
+batchings - 386.91% against 264.37% on the same prompt - which is worth remembering before
+treating any single reference number as ground truth to four digits.
+
+### Osnastka, kotoraja portila sobstvennye rezultaty
+
+Three defects in the harness, all of which produced confident wrong verdicts rather than errors:
+
+  - `Start-Process -PassThru` returns an EMPTY ExitCode unless `.Handle` is read first, and
+    `$null -ne 0` is true, so a successful build reported `sborka upala` and gave back a lock it
+    had waited 5.5 minutes for. METHODS 55, with the three-way reproduction.
+  - `ggml.dll` and `llama.dll` vanished from `build/bin/Release` for the third time in this
+    project while cmake reported the target up to date and MSBuild printed its link line anyway.
+    Every run died with -1073741515 before printing anything. METHODS 57 - including the cheap
+    repair (delete the three `link.*` tlogs, twelve seconds, no recompilation) and the reason
+    building only the example hid it.
+  - engine exit 2 means "it ran and the numbers disagree" - a result. The harness read it as a
+    broken step and paid for a duplicate three-minute 1100-token run.
