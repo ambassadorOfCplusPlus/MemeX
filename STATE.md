@@ -1208,3 +1208,33 @@ quantisation. What must be checked instead is that the difference does not grow 
 the signature of reassociation compounding, which this project has already been burned by (2.5e-8 at
 layer 1 becoming 1.6% by layer 47). Here l_out-23 is 0.4564% and l_out-24 is 0.5024%, so it is
 growing slowly; the next thing to look at is the same figure at layer 47.
+
+## Ochered modelej, zadana vladelcem 27 avgusta
+
+    1. Qwen3-Coder-30B   dovesti do konca, DOLOZHIT CIFRY
+    2. Gemma 4 26B       razobrat tem zhe sposobom
+    3. Qwen3.6 35B
+    4. Coder-Next        3 bita, zatem 4
+
+Gemma snjata s raboty na punkte 1, no ne broshena: chto po nej uzhe iskljucheno - v
+`D:\MemeX\results\gemma4_state.md` i v kommentarii u `build_gemma4_step`. Rashodimost na
+`attn_out-0` (L2 147.95%), to est vnutri pervogo bloka vnimanija, do vsjakogo MoE, pri neaktivnom
+okne. Proverено i verno: masshtab vnimanija (f_attn_scale = 1.0) i poslojnaja geometrija (sloj 0 -
+ATTN_SWA, head_dim 256, baza povorota 1e4, 8 KV-golov). Ostalos tri kandidata: rms_norm na V bez
+vesa, mesto q_norm/k_norm otnositelno povorota, i privjazka samogo zonda - esli on ukazyvaet ne na
+tu tochku, chto u etalona, to rashoditsja sravnenie, a ne graf.
+
+### Chto schitaetsja "do konca" dlja punkta 1
+
+Ne "statika na karte", a vsjo chetyre chasti zamysla vmeste:
+
+    vsja statika na karte            802 MB: vnimanie 510 + golova 243 + marshrutizator 48
+    rezidentnye eksperty rjadom      ostatok VRAM, ~26 na sloj, po simuljacii 88% popadanij
+    parallelnyj schjot CPU i karty   odno randevu na sloj, ne na uzel i ne na blok
+    obnovlenie nabora vtorym potokom bez ostanovki generacii, s bjudzhetom prodvizhenij
+
+I zamer oboih plech v odnoj sessii vperemezhku - potomu chto porog shuma 4.2% vnutrisessionnyj, a
+odin neizmennyj binarnik za sutki daval 11.99 / 13.38 / 12.95 / 12.21.
+
+Sostojanie na moment zapisi: golova na karte daet +4.0% (12.12 -> 12.61). Eto odna tret pervoj
+chasti iz chetyrjoh.
