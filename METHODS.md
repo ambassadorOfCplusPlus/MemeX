@@ -690,7 +690,7 @@ one is about which measurements even have the problem.
 кеша, — имея нулевую видимость в чужой процесс. Сосед знал ответ с самого начала и назвал его, как
 только его спросили.
 
-## 55. Start-Process -PassThru returns an EMPTY exit code, and empty is not zero
+## 60. Start-Process -PassThru returns an EMPTY exit code, and empty is not zero
 
 The build harness waited 5.5 minutes for the machine, compiled a working binary, printed
 `build exit  za 0,2 min` with nothing where the number goes, declared `sborka upala`, and gave
@@ -721,7 +721,7 @@ The general form, and it is the same shape as rule 44: a check that cannot get i
 say it has no answer. Silently substituting a value that happens to compare unfavourably turns
 "I do not know" into "it failed", and those need different responses.
 
-## 56. One name in the reference can mean two different tensors, and by layer
+## 61. One name in the reference can mean two different tensors, and by layer
 
 Our per-layer comparison probes the reference by node name. On gemma4 it reported 100-500%
 relative L2 on `attn_out` for layer after layer, which reads exactly like a broken attention
@@ -746,7 +746,7 @@ comparison, find every `cb(..., "thatname", ...)` in the reference and check the
 thing. Where they are not, the probe has to switch with them - ours now picks the pre-residual
 tensor on layers that have `wv` and the post-residual one on layers that do not.
 
-## 57. ggml.dll disappeared a third time, and this is why nothing noticed
+## 62. ggml.dll disappeared a third time, and this is why nothing noticed
 
 Every run died instantly with exit **-1073741515** (STATUS_DLL_NOT_FOUND) after a build that
 reported success. `ggml.dll` and `llama.dll` were gone from `build/bin/Release`, and the same
@@ -843,7 +843,7 @@ measured.
 не хватило разделить байты на активные параметры и сравнить с самым грубым типом в файле). Второй
 раз та же проверка, и второй раз она не была сделана.
 
-## 58. The reference was wrong in the configuration we were comparing against
+## 63. The reference was wrong in the configuration we were comparing against
 
 Gemma 4 came out of our engine with 414% relative L2 on the logits and none of six decode steps
 matching. Probing the reference's own intra-attention node names on layer 0 gave this, and the
@@ -911,10 +911,10 @@ explicit softmax, so the comparison would be node for node. That reasoning is so
 straight into the fork's least-exercised path. When picking a reference configuration, ask which
 one its author runs, not which one resembles yours.
 
-## 59. The vanishing ggml.dll has a name, and it is another agent's repair
+## 64. The vanishing ggml.dll has a name, and it is another agent's repair
 
 Three times in one morning `ggml.dll` and `llama.dll` disappeared from `build/bin/Release`; once
-`ggml.lib` went too and a link died with LNK1181. METHODS 57 recorded the mechanism by which
+`ggml.lib` went too and a link died with LNK1181. METHODS 62 recorded the mechanism by which
 MSBuild fails to notice, and named no cause. The cause was found by listing process command lines
 rather than by reasoning:
 

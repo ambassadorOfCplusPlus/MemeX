@@ -1008,7 +1008,7 @@ until the reference edits one in place after loading. `llm_scale_gate_inp_s` is 
 edit for these two architectures; it was found by grepping every `GEMMA4` mention outside the
 graph builder, which is the check that should run for any new architecture.
 
-**Odno imja - dva raznyh tenzora.** See METHODS 56. `attn_out` is pre-residual on the 25 layers
+**Odno imja - dva raznyh tenzora.** See METHODS 61. `attn_out` is pre-residual on the 25 layers
 that go through `build_std_attention` and post-residual on the 5 that do not, so the probe was
 reporting the residual as an error on 25 layers of 30 - 100-500% of pure artefact sitting on top
 of whatever the real fault was.
@@ -1026,10 +1026,10 @@ Three defects in the harness, all of which produced confident wrong verdicts rat
 
   - `Start-Process -PassThru` returns an EMPTY ExitCode unless `.Handle` is read first, and
     `$null -ne 0` is true, so a successful build reported `sborka upala` and gave back a lock it
-    had waited 5.5 minutes for. METHODS 55, with the three-way reproduction.
+    had waited 5.5 minutes for. METHODS 60, with the three-way reproduction.
   - `ggml.dll` and `llama.dll` vanished from `build/bin/Release` for the third time in this
     project while cmake reported the target up to date and MSBuild printed its link line anyway.
-    Every run died with -1073741515 before printing anything. METHODS 57 - including the cheap
+    Every run died with -1073741515 before printing anything. METHODS 62 - including the cheap
     repair (delete the three `link.*` tlogs, twelve seconds, no recompilation) and the reason
     building only the example hid it.
   - engine exit 2 means "it ran and the numbers disagree" - a result. The harness read it as a
@@ -1122,7 +1122,7 @@ gemma4 with `-fa off`, which is the flag METHODS recommends on this CPU.
 
 ### Pochemu ggml.dll ischezala: nazvano po spisku processov
 
-METHODS 57 described how MSBuild fails to notice a missing link output and named no cause.
+METHODS 64 names it; METHODS 62 described how MSBuild fails to notice a missing link output and named no cause.
 The cause is another participant running
 
     cmake --build build --target ggml --config Release -j 4 --clean-first
