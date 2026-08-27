@@ -895,3 +895,31 @@ So the fifteen-point gap at C=16 survives both. What remains is ranking by the r
 probability mass - the one version of the idea that needs the distributions, because an expert
 sitting ninth by probability never earns a count and is exactly the one about to enter the top-8.
 The trace recording is queued; nothing can be trained or checked without it.
+
+## Regressija podtverzhdena: perepakovka poterjala pochti vsju cennost
+
+First clean table in a day - every spread under the 4.2% floor, drift across rounds 2.3%, so the
+machine held still. (That the drift is now small is itself the confirmation that the neighbouring
+build was what wrecked the earlier tables.)
+
+    n=256, rtr    12.95  (3.4%)      n=256, mmap   12.32  (3.7%)
+    n=192, rtr    12.99  (2.4%)      n=192, mmap   12.45  (2.0%)
+
+Two answers:
+
+**The -n argument is not the cause.** 256 against 192 gives 12.95 and 12.99 - 0.3% apart. That
+hypothesis is dead, and with it the hope that the two numbers were simply incomparable.
+
+**There is a real regression: 12.97 against a clean 14.04, i.e. -7.6%.** And it sits where the
+suspicion pointed: repacking now buys **+4.3%** (12.97 over 12.39) where it used to buy about +34%.
+
+So the fault is in the repack path, and our own patches are the prime suspect - `repack_only`,
+`repack_exclude`, and the new allocation with `padded_need` at 64-byte alignment, all added to
+llama.cpp for the selective-repack work. The suspect list is short and the test is a bisect:
+build with the allocation change reverted and compare.
+
+Worth noting what made this findable. Three things had to be fixed before the measurement could say
+anything: the $P/$p collision that silently killed replicates 2 and 3, the fixed sleep that let a
+16 GB process's cleanup overlap the next replicate, and the neighbouring project's builds. Each was
+diagnosed wrongly at least once. The number 12.97 was available all along; what was missing was a
+machine quiet enough to read it.
