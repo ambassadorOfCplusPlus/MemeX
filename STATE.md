@@ -1947,3 +1947,30 @@ promoting more is now known to lose.
 
 Note these hit rates are lower than the 76,2% measured earlier at C=16: that was a mixed-content
 trace, this one is code only. Not comparable across traces, only within.
+
+## Period obnovlenija: umolchanie 3 bylo hudshim iz vseh
+
+    period  podkachek/tok  popadanij  podkachka ms  zhdjom   tok/s (raund 1 / 2)
+    3           6,91         71,6%        9,09      11,47    13,44
+    16          2,37         71,7         3,05       9,33    16,07
+    32          1,68         71,3         2,20       9,02    16,06 / 15,34
+    64          0,95         71,2         1,24       8,12    14,62 / 15,79
+    zamorozhen  0,00         69,3         0,00       7,29    16,47 / 16,38
+
+From period 3 to 64 the promotions drop **sevenfold**, prefetch time goes 9,09 -> 1,24 ms, the wait
+goes 11,47 -> 8,12, and the hit rate loses **0,4 points**. Period 64 even beats the frozen arm on hits
+(71,2 against 69,3), so a long period captures nearly all of freezing's gain while still adapting.
+
+**The default of 3 is the worst arm by a wide margin** - 13,44 against 16,4 for frozen. It was buying
+0,4 points of hit rate with a sevenfold increase in promotion traffic. That is a one-line change worth
+about +22%.
+
+Caveat on what is not yet a result: frozen is tight (16,47 / 16,38, 0,5% spread) but periods 32 and 64
+scatter above the floor (4,7% and 7,7%), and 16 and 3 have one replicate each. The ordering is clear;
+the exact best period is not, and a third round is needed before naming one.
+
+The adaptation data from the same session says the long period is also the *robust* choice: period 64
+loses 2,1 points of plateau against period 3 but its dip after a domain switch is five times smaller
+(5,5% against 28,1%). A frequently-refreshed set is more tightly fitted to the current domain and
+therefore more brittle; recovery takes 76 tokens regardless of period, so recovery is bounded by the
+observation window rather than by the refresh rate.
