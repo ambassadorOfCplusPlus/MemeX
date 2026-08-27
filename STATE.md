@@ -1308,3 +1308,32 @@ gap to the target. Two candidates: the CPU blocking on the card instead of compu
 (max() becoming a sum), or more than one crossing per layer at 177 us each. The measurement that
 separates them is the time the CPU thread spends blocked at the join, next to the layer time already
 printed.
+
+## Gde na samom dele uhodit vremja na karte: uzly, a ne bajty
+
+Instrumented, and it kills both of my candidates:
+
+    peresechenij     49,0 na tokjen = 1,02 na sloj
+    na peresechenie  0,603 ms = podjom 0,003 + ustrojstvo 0,470 + zabor 0,130
+    na tokjen        29,56 ms
+    zaborov cherez otobrazhenie 0
+
+One crossing per layer, exactly as designed - so "extra crossings" is dead. And 0,470 of the 0,603
+is the device computing, not the host waiting - so "the CPU blocks instead of computing in parallel"
+is dead too. I had proposed both; neither was it.
+
+**What it is instead.** Attention for one layer is ~10,6 MB of weights plus its KV slice; at
+131 GB/s that is 0,081 ms. Measured 0,470 - the card runs about **six times slower than its own
+bandwidth allows**, so it is not bandwidth-bound. The layer graph is 29 nodes and a dispatch costs
+7,2 us, giving 0,21 ms of pure launch per layer against 0,08 of bandwidth. Node count explains most
+of the gap; bytes explain almost none of it.
+
+This inverts the design assumption the whole plan was built on. The byte budget was the right lens
+while everything ran on the CPU, where bytes and time convert at 1:1 (R^2 = 0,998). On the card that
+conversion does not hold: the same bytes cost six times longer because they arrive through many
+small kernels. **The unit of cost changed when the processor changed, and the analysis did not.**
+
+Consequence for the target: 15,2-15,7 tok/s is ~65 ms; 20+ needs 50. Halving nodes per layer saves
+roughly 5 ms, which reaches ~16,5 and not 20. So node count is necessary and not sufficient, and the
+next thing to establish is what the remaining 0,26 ms per crossing is made of - a few genuinely
+bandwidth-bound kernels would mean cutting nodes is the wrong hill.
