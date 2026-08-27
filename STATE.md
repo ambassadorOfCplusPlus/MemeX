@@ -1263,3 +1263,48 @@ Worth keeping as a method: when a difference between two implementations grows w
 them to each other tells you nothing about which one is drifting. Measure the growth rate of each
 against a common reference. The sign of the difference in growth rates is the answer, and it is
 cheap - the same probes, one extra pass.
+
+## Chistyj zamer shemy na 30B: +25% ot svjazki statiki i ekspertov
+
+Two rounds, four arms, order counterbalanced (round 1 forward, round 2 reversed), one discarded
+warm-up load, machine quiet. Round means across all four arms: **12.61 and 12.64 - a 0.2% drift**,
+the steadiest conditions this project has had.
+
+                     raund 1   raund 2   razbros
+    processor         11.99     11.96     0.3%
+    statika           12.76     12.76     0.0%
+    statika+eksperty  14.71     15.32     4.1%
+    tolko eksperty    10.96     10.51     4.2%
+
+So the scheme works and is worth **about +25%** over the CPU-only path (~15.0 against ~11.98).
+Before the readback fix the same combination measured 5.74, so that one fix - a 16.9 KB read at
+22 MB/s through a BAR-mapped buffer, 0.758 ms per layer - was worth a factor of 2.6.
+
+### Chasti ne skladyvajutsja po otdelnosti, i eto glavnyj vyvod
+
+`exp` alone is **10.5-11.0, i.e. worse than CPU-only**, and it has the *higher* hit rate (87.0%
+against 71.6%) because without static on the card all of VRAM goes to experts. The expert split only
+pays on top of static:
+
+    statika odna        +6.5%
+    eksperty odni       -10%
+    vmeste              +25%
+
+Without static on the card the CPU still computes attention every layer, so the expert split adds
+crossings while removing nothing from the critical path. This retroactively explains why earlier
+"experts on the card" attempts measured 0.93x and were closed as a failure: those measurements were
+correct and the conclusion drawn from them was not - the configuration being measured was the one
+where the technique cannot work.
+
+Worth keeping as a caution: **a technique that fails in isolation may be the second half of one that
+works.** Closing it on its own evidence is exactly right as a measurement and exactly wrong as a
+decision, unless the pairing was tried.
+
+### Chto ostajotsja do 20+
+
+15.0 tok/s is 66.7 ms/token. The target needs 50 ms. The instrumented figures account for 32.5 ms
+(sloi 29-30 + golova 2.4), so **about 34 ms is unaccounted** - twice the 17 ms that would close the
+gap to the target. Two candidates: the CPU blocking on the card instead of computing in parallel
+(max() becoming a sum), or more than one crossing per layer at 177 us each. The measurement that
+separates them is the time the CPU thread spends blocked at the join, next to the layer time already
+printed.
