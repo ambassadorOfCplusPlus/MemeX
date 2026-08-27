@@ -1589,3 +1589,100 @@ that would have been credited with a speed gain it does not deliver.
 
 The open question is where the 3 ms went: the layer got faster by that much and the token did not.
 It moved rather than vanished, and the candidates are the join wait and the readback.
+
+## Kuda ushli 3 ms: ne v zabor i ne v disbalans polovin - v POTOK KARTY, zanjatyj podkachkami
+
+Vopros byl postavlen tak: sloj otdal 3 ms, a tokjen ih ne poluchil, znachit vremja peremestilos.
+Otvet uzhe lezhal v vyvode teh zhe progonov, i ego ne prishlos merit zanovo.
+
+### Chistoe plecho sync, tri povtora, vse razbrosy pod 1%
+
+    tokjen (15.15 tok/s)                        66.0 ms
+    ---------------------------------------------------
+    polovina CPU (fork -> join)                 16.06
+    polovina karty (ms_job, chasy workera)      21.25
+    ZHDJOM (pul ggml POLNOSTJU ostanovlen)      11.48    17% tokjena
+        iz nego disbalans polovin                5.19
+        OSTATOK, disbalansom ne objasnjonnyj      6.29
+    PODKACHKI zanjali potok karty               13.04    <-- vot ono
+    peresechenija 49 x 0.606                    29.7
+    iz nih zabor 49 x 0.132                      6.5
+
+### Podkachki idut v TRI raza medlennee kanala
+
+Dvizhok sam pechataet obe cifry, na sosednih strokah, i oni ne sovpadajut:
+
+    "podkachek 6.9 na tokjen = 17.3 MB po PCIe pri 3.94 GB/s = 4.4 ms/tokjen"
+    "podkachki zanjali potok karty 13.04 ms/tokjen"
+
+13.04 ms na 17.3 MB - eto **1.33 GB/s protiv 3.94 GB/s kanala**. Odna podkachka (odin ekspert,
+tri matricy, odin barjer) stoit 1.89 ms tam, gde kanal prosit 0.64. Izbytok **8.6 ms na tokjen**,
+i on lezhit na TOM SAMOM potoke, kotorogo CPU zhdjot na dzhojne.
+
+Eto v tochnosti to, chto predskazyval kommentarij v gpu_experts.cpp: "dispatch, prishedshij poka
+v poljote podkachka, ne nachnjotsja do vozvrata ejo barjera, i eta zaderzhka ne vidna nigde,
+krome kak v ozhidanii na dzhojne, kotoroe disbalansom polovin ne objasnjaetsja". OSTATOK 6.29 ms
+- eto i est ona, i po velichine ona soglasuetsja s 13.04 ms podkachek pri 8.9% forkov, popavshih
+v zanjatyj potok.
+
+**I rjadom stoit oshibka po pravilu 67 - v nashem zhe vyvode.** Dvizhok pechataet: "PCIe na
+podkachki prosit 4.4 ms - menshe, to est podkachka sama sebja oplachivaet". Eto rassuzhdenie
+postroeno na TEORETICHESKIH 4.4 ms, pri tom chto izmerennye 13.04 napechatany dvadcatju strokami
+nizhe. Schjotchik, postavlennyj rjadom s prijomom, podtverzhdaet tu velichinu, kotoruju schitaet.
+Zdes u nas byli obe velichiny i vsjo ravno v vyvod poshla ne ta.
+
+### Dva kandidata iz zadanija: odin oprovergnut, vtoroj neprigoden dlja proverki v etom pleche
+
+**Zabor - oprovergnut.** 0.132 -> 0.135 ms na peresechenie. Ne dvinulsja; 3 ms ushli ne tuda.
+
+**Dzhojn - ne umenshilsja, a vyros: 11.48 -> 17.83 ms.** No etu cifru zaschitat nelzja, i eto
+vazhnee samoj cifry. V pleche nosync `polovina CPU` uehala 16.06 -> 13.86 pri razbrose 30%
+(16.14/16.40/15.64 protiv 15.46/14.28/11.85), potomu chto arifmetika tam razrushena. Znachit
+kontaminirovany vse tri velichiny, prohodjashchie cherez CPU: tok/s, polovina CPU i dzhojn.
+Ostajotsja tolko odno bezopasnoe utverzhdenie, i ono otvechaet na vopros: **dzhojn ne sokratilsja
+na te 3 ms, kotorye otdala karta.** Skorost karty - ne to, chto zadajot ozhidanie.
+
+### Proverka korrektnosti plecha nosync: provedena, i ona NE PROSHLA
+
+Eto bylo sdelano do ljubyh vyvodov, i imenno poetomu tok/s ottuda ne poshjol v rezultat:
+
+    0 iz 192 tokenov sovpalo podrjad
+    hudshaja otn. L2 logitov 140.27%
+    dva shaga iz chetyrjoh vernuli -1.000000000% - chasovoe znachenie "etalon nulevoj" (pravilo 11)
+
+To est barjery derzhali korrektnost, i snjatie vseh - ne to zhe samoe, chto snjatie lishnih.
+Zaschityvaetsja iz togo plecha rovno odna velichina - vremja jader na ustrojstve, ot dannyh ne
+zavisjashchee, - i ona podtverzhdena NEZAVISIMO sinteticheskim zondom, gde oba plecha dvigajut
+odni i te zhe bajty: 201.27 -> 111.90 us na 32 uzla, 2.8 us na barjer.
+
+### Vetka barjera zakryta polnostju, tremja zamerami
+
+    barjery est                        201.27 us / 32 uzla
+    suzheny dostupy   (NARROW_SYNC=1)  201.29     -0.13%   nichego
+    suzheny + stadii  (NARROW_SYNC=2)  201.05     -0.11%   nichego
+    barjerov net      (NO_SYNC=1)      111.90    -44.4%    no arifmetika razrushena
+
+Klyuchi podtverzhdeny kak PRIMENJONNYE (pravilo 68), tak chto eto "bespolezno", a ne "ne
+vkljuchilos". Cena barjera - v samom fakte `vkCmdPipelineBarrier` mezhdu dispatchami, a ne v tom,
+chto on objavljaet. Znachit deshevle sdelat ego nelzja - tolko rezhe, a rezhe mozhno tolko tam, gde
+on ne nuzhen dlja korrektnosti: chetyre dispatcha iz devjatnadcati, 0.8% tokjena.
+
+### Vyvod, kotoryj stoit skazat pryamo
+
+Karta ne na kriticheskom puti - na njom potok karty. Iz ego ~34 ms na tokjen 13.04 uhodit na
+podkachki, a ne na dispatch, kotorogo zhdjot CPU, i idut oni vtroe medlennee kanala. Vse tri
+rychaga, na kotorye ukazyvalo zadanie (rezka uzlov, uslovnyj barjer, "kormit ustrojstvo"),
+napravleny na ustrojstvo, i vse tri izmereny kak nichto ili pochti nichto:
+
+    slitoj hvost MoE          -0.1%     (predskazano +0.3..+2.5, zadanie 15.0 -> 16.5-17)
+    rezka uzlov dalshe        0.5% potolok, poschitano po grafu
+    barjer, ljubaja korrektnaja versija   0.8% potolok
+    zabor                     ne dvigaetsja
+
+A ne izmereno i krupno:
+
+    podkachki: 8.6 ms/tokjen izbytka nad kanalom, na potoke, kotorogo zhdjot CPU
+    ZHDJOM: 11.48 ms/tokjen, iz nih 6.29 ne objasnjajutsja disbalansom polovin
+
+Sledujushchij shag - ne graf i ne barjer, a **pochemu podkachka 2.51 MB stoit 1.89 ms vmesto
+0.64**, i mozhno li vynesti ejo s togo potoka, na kotorom CPU stoit na dzhojne.
