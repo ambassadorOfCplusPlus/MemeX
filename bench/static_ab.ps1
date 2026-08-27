@@ -22,6 +22,7 @@ param(
     [int]    $Threads = 8,
     [int]    $Resident = 0,      # 0 - jomkost vybiraetsja po svobodnoj videopamjati
     [switch] $NoExperts,         # tolko dva plecha: cpu i statika
+    [switch] $ExpAlone,          # dobavit plecho "eksperty bez statiki" - razdeljaet rychagi
     [switch] $External           # zamok u vyzyvajushchego
 )
 
@@ -136,12 +137,20 @@ $arms = @(
 if (-not $NoExperts) {
     $arms += @{ t = 'stat_exp'; e = @('--gpu-static-layers', '--gpu-experts', '--resident', "$Resident") }
 }
+# Chetvjortoe plecho razdeljaet dva rychaga, kotorye inache smesheny v odnom chisle. Bez
+# statiki na karte u ekspertov BOLSHE videopamjati (846 MiB osvobozhdajutsja, to est plus
+# okolo sedmi ekspertov na sloj), tak chto eto ne "ta zhe shema minus statika" - eto drugaja
+# raskladka, i imenno poetomu ejo nado izmerit, a ne vychest.
+if ($ExpAlone) {
+    $arms += @{ t = 'exp'; e = @('--gpu-experts', '--resident', "$Resident") }
+}
 
+# Zamok berjotsja NA RAUND, a ne na vsjo A/B. Vtoroj proekt delit etu mashinu pod tem zhe
+# zamkom, i ego progony uzhe tri raza padali po tajm-autu iz-za nashih neotpuskaemyh blokov;
+# dogovor - ne bolshe 20 minut podrjad i ne menshe 5 minut pauzy. Raund iz trjoh plech
+# ukladyvaetsja v 20, i pri etom vsja tablica ostajotsja ODNOJ sessiej: sravnimost mezhdu
+# plechami derzhitsja na tom, chto oni snjaty vperemezhku, a ne na tom, chto zamok ne otpuskali.
 $ownsLock = -not $External
-if ($ownsLock) {
-    if (-not (Take-Machine -Who 'static-ab' -TimeoutMin 120 -MinFreeGB 16)) { Note 'mashinu ne poluchili'; exit 1 }
-} else { Note 'blokirovka u vyzyvajushchego, sami ne berjom' }
-Note ('vladeem: ' + (Get-LockHolder))
 
 $acc = @{}
 foreach ($arm in $arms) { $acc[$arm.t] = @{ gen = @(); ref = @(); head = @(); layer = @(); hit = @() } }
@@ -149,6 +158,11 @@ foreach ($arm in $arms) { $acc[$arm.t] = @{ gen = @(); ref = @(); head = @(); la
 try {
     Say ("A/B: raundov $Reps, plech " + $arms.Count + ", --gen $Ngen, --tokens $Tokens, prompt $PROMPT")
     for ($r = 1; $r -le $Reps; $r++) {
+        if ($ownsLock) {
+            if ($r -gt 1) { Note 'pauza 5 minut - mashina svobodna dlja sosednego proekta'; Start-Sleep -Seconds 300 }
+            if (-not (Take-Machine -Who 'static-ab' -TimeoutMin 120 -MinFreeGB 16)) { Note 'mashinu ne poluchili'; break }
+            Note ('vladeem: ' + (Get-LockHolder))
+        }
         # Porjadok plech perevorachivaetsja kazhdyj vtoroj raund.
         $order = if ($r % 2 -eq 1) { $arms } else { $arms[($arms.Count-1)..0] }
         Say ("raund $r / $Reps, porjadok: " + (($order | ForEach-Object { $_.t }) -join ' -> '))
@@ -166,6 +180,7 @@ try {
             if ($res.ContainsKey('layer')) { $acc[$arm.t].layer += $res.layer }
             if ($res.ContainsKey('hit'))   { $acc[$arm.t].hit   += $res.hit }
         }
+        if ($ownsLock) { Free-Machine; Note 'zamok otpushchen do sledujushchego raunda' }
     }
 
     Say 'itog'
@@ -200,5 +215,7 @@ try {
         Note 'plecho cpu dalo menshe dvuh povtorov - sravnivat ne s chem'
     }
 } finally {
+    # Idempotentno: Free-Machine na neuderzhivaemom zamke - pustaja operacija, a ostavlennyj
+    # zamok posle padenija skripta stoil ocheredi dvazhdy.
     if ($ownsLock) { Free-Machine; Note 'mashina osvobozhdena' }
 }
