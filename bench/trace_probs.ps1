@@ -31,6 +31,10 @@ try {
     # -b/-ub objazatelny: promt na 4000 tokenov ne vlezaet v batch po umolchaniju (2048), i
     # llama.cpp padaet na GGML_ASSERT(n_tokens_all <= cparams.n_batch) do togo, kak chto-libo
     # zapisat. Kontekst zadan, a razmer batcha - net; eto raznye veshchi, i pervyj vtoroj ne zadajot.
+    # Promt na 2000 tokenov, ne 4000. Chetvjortoe padenie etoj trassy bylo iz-za togo, chto ja
+    # podnjal batch do 4096, a prompt_4000.txt eto 17205 bajt, to est okolo 4300 tokenov - "chetyre
+    # simvola na tokjen" ja vzjal kak dannost i ne proverил. Dlja trassy dvuh tysjach s izbytkom:
+    # nuzhny raspredelenija marshrutizatora, a ne dlinnyj kontekst.
     Say 'zapis trassy s polnymi raspredelenijami marshrutizatora'
     # Staryj fajl udaljaetsja do progona, inache ego nalichie posle progona nichego ne dokazyvaet.
     if (Test-Path $OUT) { Remove-Item $OUT -Force -EA SilentlyContinue }
@@ -39,7 +43,7 @@ try {
     $exe = "$BIN" + [char]92 + "llama-moe-trace.exe"
     if (-not (Test-Path $exe)) { $exe = "$BIN" + [char]92 + "moe-trace.exe" }
     if (-not (Test-Path $exe)) { Note 'net binarnika moe-trace'; exit 1 }
-    & $exe -m 'D:\Qwen3-Coder-30B-A3B-mx1.gguf' -f 'D:\MemeX\results\prompt_4000.txt' -c 4096 -b 4096 -ub 4096 -t 8 -ngl 0 -fa off `
+    & $exe -m 'D:\Qwen3-Coder-30B-A3B-mx1.gguf' -f 'D:\MemeX\results\prompt_2000.txt' -c 4096 -b 4096 -ub 4096 -t 8 -ngl 0 -fa off `
         -no-fmoe -no-fug --seed 1 *> 'D:\MemeX\results\trace_run.log'
     Remove-Item Env:MOE_TRACE_PROBS -EA SilentlyContinue
     Remove-Item Env:MOE_TRACE_OUT   -EA SilentlyContinue
