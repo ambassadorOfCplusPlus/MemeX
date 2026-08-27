@@ -56,15 +56,16 @@ function Wait-Settled([int]$capSec = 180, [int]$deltaMB = 200) {
 
 # $proc, nikogda $p: dvazhdy proekt terjal povtory 2 i 3 kazhdogo plecha iz-za lokalnoj
 # peremennoj, nazvannoj kak odnobukvennaja skriptovaja - PowerShell ne razlichaet registr.
-function RunOnce($tag, [string[]]$extra, [int]$limitSec) {
+function RunOnce($tag, [string[]]$extra, [int]$limitSec, [int]$genOverride = 0) {
     $hogs = Get-CpuHogs -MinPct 12
     if ($hogs) {
         Note ('KONKURENTY pered progonom: ' +
               (($hogs | ForEach-Object { "$($_.Name)/$($_.Id) $([math]::Round($_.Pct,0))%" }) -join ', '))
     }
+    $gen = if ($genOverride -gt 0) { $genOverride } else { $Ngen }
     $so = "D:\MemeX\results\_sab_$tag.out"
     $a = @('-m', $MODEL, '-f', $PROMPT, '--tokens', "$Tokens", '-t', "$Threads",
-           '--gen', "$Ngen", '--no-repack') + $extra
+           '--gen', "$gen", '--no-repack') + $extra
     $proc = $null
     try {
         $proc = Start-Process -FilePath $SNAP -ArgumentList $a -WindowStyle Hidden -PassThru `
@@ -154,6 +155,9 @@ $ownsLock = -not $External
 
 $acc = @{}
 foreach ($arm in $arms) { $acc[$arm.t] = @{ gen = @(); ref = @(); head = @(); layer = @(); hit = @() } }
+# Srednee po plecham vnutri raunda. Drejf mashiny mezhdu raundami inache viden tolko kak
+# razbros vnutri plecha, gde on neotlichim ot razbrosa samogo plecha. Zdes on - chislo.
+$roundMean = @()
 
 try {
     Say ("A/B: raundov $Reps, plech " + $arms.Count + ", --gen $Ngen, --tokens $Tokens, prompt $PROMPT")
@@ -163,9 +167,22 @@ try {
             if (-not (Take-Machine -Who 'static-ab' -TimeoutMin 120 -MinFreeGB 16)) { Note 'mashinu ne poluchili'; break }
             Note ('vladeem: ' + (Get-LockHolder))
         }
+        # PROGREV, i on vybrasyvaetsja. Model 16 GB, i pervaja zagruzka dnja tjanet ejo s diska,
+        # a vse sledujushchie berut iz kesha stranic Windows. Eto raznica v desjatki sekund na
+        # zagruzku i zametnaja - na pervyh shagah generacii, poka kesh promta i kod ne progrety.
+        # Bez vybroshennoj zagruzki ona celikom dostajotsja pervomu plechu pervogo raunda, a
+        # perestanovka porjadka po chjotnosti ejo NE lechit: ona lechit sistematicheskij naklon,
+        # a ne odnokratnyj vybros v samom nachale.
+        if ($r -eq 1) {
+            Say 'progrev: odna zagruzka na vybros, chisla iz nejo ne idut nikuda'
+            $w = RunOnce 'warm' @() 900 16
+            if ($w.err) { Note ('progrev NE POSHJOL: ' + $w.err) }
+            else        { Note ('progrev: {0:N2} tok/s - VYBROSHENO' -f $w.gen) }
+        }
         # Porjadok plech perevorachivaetsja kazhdyj vtoroj raund.
         $order = if ($r % 2 -eq 1) { $arms } else { $arms[($arms.Count-1)..0] }
         Say ("raund $r / $Reps, porjadok: " + (($order | ForEach-Object { $_.t }) -join ' -> '))
+        $thisRound = @()
         foreach ($arm in $order) {
             $res = RunOnce ("$($arm.t)_$r") $arm.e 1200
             if ($res.err) { Note ("$($arm.t) NE POSHLO: " + $res.err); continue }
@@ -179,11 +196,33 @@ try {
             if ($res.ContainsKey('head'))  { $acc[$arm.t].head  += $res.head }
             if ($res.ContainsKey('layer')) { $acc[$arm.t].layer += $res.layer }
             if ($res.ContainsKey('hit'))   { $acc[$arm.t].hit   += $res.hit }
+            $thisRound += $res.gen
+        }
+        # Srednee po VSEM plecham raunda. Esli ono edet ot raunda k raundu, edet mashina:
+        # sostav plech odin i tot zhe, poetomu iz srednego oni sokrashchajutsja.
+        if ($thisRound.Count -eq $arms.Count) {
+            $rm = ($thisRound | Measure-Object -Average).Average
+            $roundMean += $rm
+            Note ('raund {0}: srednee po {1} plecham {2:N2} tok/s' -f $r, $arms.Count, $rm)
+        } else {
+            # ${r}, ne $r: PowerShell chitaet "$r:" kak peremennuju s prefiksom diska.
+            Note ("raund ${r}: plech proshlo $($thisRound.Count) iz $($arms.Count) - srednee ne schitaetsja")
         }
         if ($ownsLock) { Free-Machine; Note 'zamok otpushchen do sledujushchego raunda' }
     }
 
     Say 'itog'
+    # Drejf mashiny mezhdu raundami - otdelnym chislom, do vsjakih sravnenij plech. Sostav
+    # plech v kazhdom raunde odin i tot zhe, poetomu iz srednego po raundu oni sokrashchajutsja
+    # i ostajotsja tolko mashina. Esli eto chislo vyshe poroga, plechi sravnivat mozhno (oni
+    # snjaty vperemezhku), a vot govorit "raund k raundu stalo bystree" - nelzja.
+    if ($roundMean.Count -ge 2) {
+        $rmAvg = ($roundMean | Measure-Object -Average).Average
+        $rmSp  = 100.0 * (($roundMean | Measure-Object -Maximum).Maximum -
+                          ($roundMean | Measure-Object -Minimum).Minimum) / $rmAvg
+        Note ('srednee po plecham po raundam: ' + (($roundMean | ForEach-Object { '{0:N2}' -f $_ }) -join ' / ') +
+              ('  -> drejf mashiny {0:N1}%{1}' -f $rmSp, $(if ($rmSp -gt 4.2) { ' - VYSHE PORoga' } else { ' - v predelah shuma' })))
+    }
     foreach ($arm in $arms) { Note (Summ ("$($arm.t) tok/s") $acc[$arm.t].gen) }
     foreach ($arm in $arms) { Note (Summ ("$($arm.t) etalon") $acc[$arm.t].ref) }
     foreach ($arm in $arms) {
