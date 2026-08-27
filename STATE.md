@@ -1554,3 +1554,38 @@ Chto ja delat NE sobirajus, i pochemu: "vydavat statiku sledujushchego sloja, po
 schitaet ekspertov tekushchego". Sloj L+1 nachinaetsja s l_out sloja L, kotoryj est summa
 poloviny karty i poloviny CPU, - to est do konca ekspertov sloja L vydavat nechego. Eto ta zhe
 posledovatelnaja zavisimost, o kotoruju uzhe razbilas ideja s planirovshchikom.
+
+## Karta bolshe ne na kriticheskom puti, i eto otmenjaet postanovku zadachi
+
+Synthetic probe, 32 tiny nodes:
+
+    barjery vkljucheny         201,27 mks
+    barjery s suzhennoj oblastju 201,05    nol effekta
+    barjery vykljucheny        113,41    -44%
+
+Narrowing the barrier's access masks and pipeline stages does **nothing**; only removing it entirely
+helps. And even with barriers off, chain versus fan measures 1,036 - so the barrier was never
+blocking overlap, it simply cost about 2,8 us per node on its own.
+
+Now put that next to the model. Removing the barriers made the **layer 10% faster** (29,69 ->
+26,71 ms) and the **token 2,4% slower** (15,15 -> 14,78, predicted +2..+4%).
+
+**A 10% faster card does not make a faster token. So the card is no longer the critical path.**
+
+That retires the framing I gave the agent. Three levers in a row were aimed at the card - fuse the
+graph, cut the barriers, keep the device fed - and the first two returned zero and negative. The
+measurement says the remaining time is not on the device: it is in the CPU half or in the handoff.
+
+Four predictions written down before measuring and refuted so far:
+
+    scheduler contention (-t 7)      predicted 16,0-16,8   measured 15,2-15,7, wait ROSE
+    promotions blocking the worker   predicted 15-30% / <10%   measured 8,6% / 16,9%, reversed
+    fusing the MoE tail              predicted 16,5-17     measured 15,19 vs 15,20
+    removing the barriers            predicted +2..+4%     measured -2,4%
+
+None of these would have been visible as errors without writing the number first. Each would have
+been applied, believed, and built upon - the fusion in particular is a real correctness improvement
+that would have been credited with a speed gain it does not deliver.
+
+The open question is where the 3 ms went: the layer got faster by that much and the token did not.
+It moved rather than vanished, and the candidates are the join wait and the readback.
