@@ -1753,3 +1753,19 @@ blocking the worker, fusing the MoE tail, removing the barriers, batching the pr
 never in any one of them being right - it is that two of the five turned out to share a cause, and
 that only became visible because both were recorded with numbers instead of being applied and
 forgotten.
+
+## Vetka paketirovanija zakryta
+
+    paket s ustupkoj potoka:  razmer paketa 6,765 -> 2,294 (-66%), zhdjom 15,275 -> 14,198 (-7,0%),
+                              tok/s 14,702 -> 14,945 (+1,7%)
+    protiv ishodnogo drain1:  zhdjom 11,403 -> 14,198 (+24,5%), tok/s 14,976 -> 14,945 (-0,2%)
+
+Yielding the thread recovers most of what batching lost but does not beat the original one-at-a-time
+path. Closed by the agent's own criterion, stated before the run.
+
+This is the direct confirmation of rule 75: **one-at-a-time was already the smoothest**, and every
+change that made the transfer lumpier cost more in waiting than it saved in transfer time. There is
+nothing to win here, which is worth knowing precisely because it looked like the obvious win.
+
+Running now: the budget sweep down to a frozen set - the counterintuitive test. If the shared-host-
+bandwidth mechanism is right, the token gets faster while the hit rate gets worse.
