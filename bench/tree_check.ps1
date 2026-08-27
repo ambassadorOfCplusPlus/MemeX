@@ -77,6 +77,20 @@ function Test-TreeStartable {
             $ok = $false
             continue
         }
+        # A non-zero code that is NOT a loader code means the program started and then refused
+        # the argument, which is the opposite of what this check is looking for. llama-memex-fwd
+        # has no --version and answers exit 1; calling that unloadable would be the check crying
+        # wolf, and a check that cries wolf gets ignored on the day it is right. So: retry with
+        # --help, and only report a failure if the program will not start under either.
+        $loader = ($code -eq -1073741515 -or $code -eq -1073741511)
+        if ($code -ne 0 -and -not $loader -and $Arg -ne '--help') {
+            & $p --help *> $null
+            $alt = $LASTEXITCODE
+            if ($alt -eq 0) {
+                Write-Host "  proverka dereva: $e ne znaet $Arg (exit $code), no --help -> 0: zapuskaetsja"
+                continue
+            }
+        }
         $why = switch ($code) {
             -1073741515 { ' (STATUS_DLL_NOT_FOUND - DLL ne najdena)' }
             -1073741511 { ' (STATUS_ENTRYPOINT_NOT_FOUND - DLL i exe iz raznyh sborok)' }

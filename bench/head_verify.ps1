@@ -31,8 +31,8 @@ $MODEL  = 'D:\Qwen3-Coder-30B-A3B-mx1.gguf'
 $LOG    = 'D:\MemeX\results\head_verify.log'
 $PROMPT = 'D:\MemeX\results\prompt_2000.txt'
 
-function Say($m)  { ("`n[{0}] ===== {1}" -f (Get-Date -Format 'HH:mm'), $m) | Tee-Object -FilePath $LOG -Append }
-function Note($m) { ("  " + $m) | Tee-Object -FilePath $LOG -Append }
+function Say($m)  { ("`n[{0}] ===== {1}" -f (Get-Date -Format 'HH:mm'), $m) | ForEach-Object { Write-Host $_; Add-Content -LiteralPath $LOG -Value $_ -Encoding UTF8 } }
+function Note($m) { ("  " + $m) | ForEach-Object { Write-Host $_; Add-Content -LiteralPath $LOG -Value $_ -Encoding UTF8 } }
 
 function RunStep($tag, [string[]]$a, [int]$limitSec) {
     $so = "D:\MemeX\results\_hv_$tag.out"

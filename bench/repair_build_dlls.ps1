@@ -45,7 +45,7 @@ $ErrorActionPreference = 'Continue'
 $BIN = Join-Path $BuildDir 'bin/Release'
 $LOG = 'D:\MemeX\results\repair_build.log'
 
-function Note($m) { ("  " + $m) | Tee-Object -FilePath $LOG -Append }
+function Note($m) { ("  " + $m) | ForEach-Object { Write-Host $_; Add-Content -LiteralPath $LOG -Value $_ -Encoding UTF8 } }
 
 ("`n`n######## repair build DLLs " + (Get-Date)) | Add-Content $LOG
 

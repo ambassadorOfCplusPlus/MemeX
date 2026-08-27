@@ -881,9 +881,15 @@ Reading the fork at that node explains it, and the fault is in the fork:
     `[n_embd_head_v, n_kv, n_head_kv]` with matching strides. Store and read agree.
 
 So the fork's gemma4 is correct with flash attention and wrong without it, and every number we
-had was measured against the wrong one. `--ref-fa` now selects the reference's arm explicitly,
-and the A/B - same prompt, same binary, one flag - is the confirmation this entry is still
-waiting on. The one-line fix on the fork's side, not applied here because the reference is shared
+had was measured against the wrong one. The A/B - same prompt, same binary, one flag - confirms
+it:
+
+    flash_attn off   prefil L2 414.33%   luchshij token razoshjolsja   0 iz 6 tokenov
+    flash_attn on    prefil L2  10.54%   luchshij token sovpal         3 iz 6 tokenov
+
+and at layer 0 the run against the working arm gives ELEVEN consecutive tensors at exactly
+0.0000% - `kqv_out-0` and `attn_out-0` among them, the two that read 217.66% and 147.95% against
+the broken arm. Our gemma4 attention block is byte-for-byte the reference's. The one-line fix on the fork's side, not applied here because the reference is shared
 with other work in flight, is to flatten V back to 2-D after the norm.
 
 Three things worth carrying, and the third is the one that cost the time:

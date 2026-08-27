@@ -1138,3 +1138,42 @@ Two fixes, and they need each other: the repair must take the lock (rule 40, wit
 nobody enrolled), and it must be as narrow as the fault - deleting three `link.*` tlogs and
 relinking takes twelve seconds against `--clean-first`'s half hour, and the objects were never
 the problem.
+
+### A/B podtverdil: etalon byl nepraven, a nash blok vnimanija tochen do bita
+
+Same binary, same 12-token prompt, one flag changed. `--ref-fa` makes the reference run flash
+attention, which is the arm in which its gemma4 V cache is stored and read consistently.
+
+    arm                       prefil, logity   luchshij token   dekod 6 shagov
+    flash_attn off (bylo)     L2 414.33%       RAZOSHLIS        0 iz 6
+    flash_attn on  (--ref-fa) L2  10.54%       SOVPAL           3 iz 6
+
+And at layer 0, with the reference in its working arm, ELEVEN consecutive tensors are exactly
+zero - the whole attention block now, not just its front half:
+
+    attn_norm-0, Qcur-0, Kcur-0, Vcur-0, Qcur_normed-0, Qcur_roped-0,
+    Kcur_normed-0, Kcur_roped-0, kqv_out-0, attn_out-0, ffn_norm_2-0
+                                          L2 0.0000%, max |d| 0.00000
+
+`kqv_out-0` and `attn_out-0` were 217.66% and 147.95% against the broken arm and are 0.0000%
+against the working one. Our gemma4 attention - the windowed geometry, the 1.0 scale, the
+unweighted V rms_norm, the V-from-K sharing, the per-layer rope base, the KV cache layout - is
+byte-for-byte the reference's. Nothing in it needs changing.
+
+**What remains is a second and much smaller fault, and it is now localised too.** The first
+non-zero line is `ffn_moe_combined-0` at **17.11%**, with rms 20.65637 against 20.65505 - the two
+answers are the same size, so this is not a missing scale. Everything upstream of it, including
+`ffn_norm_2-0` (the MoE's own input), is exact. So the fault is inside layer 0's feed-forward:
+the dense half, the router, the experts, or the `fused_rms_rms_add` that joins the two halves.
+A probe under the reference's own name for the routed half (`ffn_moe_weighted`, which our
+`ffn_moe_out` never matched, so the routed half has never actually been compared) plus one for
+the dense half's input (`ffn_norm_1`) splits that four ways, and is queued.
+
+Downstream the error stays bounded rather than exploding - prefill logits 10.54%, decode steps
+7.3-36.1% - and the generated text is now sensible (" Tokyo. The capital of France"), which is
+what a single arithmetic difference in one sub-block looks like rather than a wiring fault.
+
+**The router-scale fix is in this binary**, so the 17% is what is left AFTER correcting
+`ffn_gate_inp.scale` for `llm_scale_gate_inp_s`. Whether that fix helped cannot be read off these
+numbers alone - there is no before/after pair for it on the working reference arm - and that is
+worth one arm later.

@@ -1,104 +1,116 @@
-# Единственный способ собирать этот проект. Через него, а не голым cmake.
+# Edinstvennyj sposob sobirat etot proekt. Cherez nego, a ne golym cmake.
 #
-# Почему он существует. Трижды за проект из `build\bin\Release` исчезала `ggml.dll`, и первый раз
-# это стоило ночи: CMake считает цели готовыми, обычная пересборка — пустышка, а бинарники падают
-# на загрузчике Windows ДО первой строки вывода. Логи приходят пустыми, и это читается как «прогон
-# не дал данных», а не «прогон не состоялся».
+# ZACHEM. Trizhdy iz build/bin/Release ischezala ggml.dll, i pervyj raz eto stoilo nochi: CMake
+# schitaet celi gotovymi, obychnaja peresborka - pustyshka, a binarniki padajut na zagruzchike
+# Windows DO pervoj stroki vyvoda. Logi prihodjat pustymi, i eto chitaetsja kak "progon ne dal
+# dannyh", a ne "progon ne sostojalsja".
 #
-# Причина найдена и она неприятная: **`--clean-first` сначала удаляет всё, что цель производит**, и
-# только потом собирает. То есть лекарство, прописанное после первой аварии, стало причиной второй
-# и третьей — между удалением и концом сборки дерево заведомо сломано, и если в это окно сборку
-# прервать (кончилась сессия, убили процесс, отключили свет — у нас было всё три), оно таким и
-# остаётся.
+# PRICHINA najdena i ona neprijatnaja: --clean-first SNACHALA UDALJAET vsjo, chto cel proizvodit, i
+# tolko potom sobiraet. To est lekarstvo, propisannoe posle pervoj avarii, stalo prichinoj vtoroj i
+# tretjej - mezhdu udaleniem i pojavleniem derevo zavedomo slomano, i esli v eto okno sborku
+# prervat (dvazhdy konchalas sessija, odin raz otkljuchali svet), ono takim i ostajotsja.
 #
-# Отсюда три правила, которые этот скрипт исполняет вместо человека:
-#   1. Собирать под машинным замком. Полная сборка занимает четыре ядра на десять минут, и делать
-#      это при свободном замке — то же самое, что портить чужой замер молча. Один раз уже так вышло.
-#   2. После сборки проверять ЗАПУСКАЕМОСТЬ, а не код возврата cmake. Сборка, завершившаяся успехом
-#      и оставившая незагружаемое дерево, хуже упавшей: отказ всплывает через три шага в чужой
-#      работе.
-#   3. `--clean-first` применять только к полной цепочке ggml → llama → бинарники, никогда к одной
-#      цели. Чистка одной цели гарантирует окно, в котором остальные ссылаются на удалённое.
+# TRI PRAVILA, kotorye etot skript ispolnjaet vmesto cheloveka:
+#   1. Sobirat pod mashinnym zamkom. Polnaja sborka zanimaet chetyre jadra na desjat minut, i delat
+#      eto pri svobodnom zamke - to zhe samoe, chto portit chuzhoj zamer molcha. Odin raz tak vyshlo.
+#   2. Posle sborki proverjat ZAPUSKAEMOST, a ne kod vozvrata cmake. Sborka, zavershivshajasja
+#      uspehom i ostavivshaja nezagruzhaemoe derevo, huzhe upavshej: otkaz vsplyvaet cherez tri shaga
+#      v chuzhoj rabote.
+#   3. --clean-first primenjat tolko k polnoj cepochke ggml -> llama -> binarniki, nikogda k odnoj
+#      celi. Chistka odnoj celi garantiruet okno, v kotorom ostalnye ssylajutsja na udaljonnoe.
+#
+# Napisano latinicej namerenno: PowerShell na etoj mashine chitaet fajly bez metki kak ANSI, i
+# kirillica v skripte lomaet razbor. Ostalnye skripty proekta po toj zhe prichine takie zhe.
 
 param(
     [string[]]$Targets = @('llama-cli'),
-    [string]  $Dir     = 'D:\MemeX\src\ik_llama.cpp\build',
+    [string]  $Dir     = 'D:/MemeX/src/ik_llama.cpp/build',
     [switch]  $Clean,
     [int]     $Jobs    = 4,
     [int]     $LockMin = 120,
-    [switch]  $NoLock          # только если замок уже держит вызывающий
+    [switch]  $NoLock
 )
 
 $ErrorActionPreference = 'Continue'
-. 'C:\Users\User11\Desktop\MemeX\bench\lock.ps1'
+. 'C:/Users/User11/Desktop/MemeX/bench/lock.ps1'
 
-$bin = Join-Path $Dir 'bin\Release'
-
+$bin = Join-Path $Dir 'bin/Release'
 function Say($m) { Write-Output ("[{0}] {1}" -f (Get-Date -Format 'HH:mm'), $m) }
 
-# Запускаемость — единственная проверка, которой можно верить. Коды, которые стоит узнавать в лицо:
-#   -1073741511  точка входа не найдена: DLL не соответствует exe, то есть пересобрали половину
-#   -1073741515  DLL не найдена вовсе
+# Vyzov cherez -File peredajot spisok celej ODNOJ strokoj: "llama-cli,llama-moe-trace" prihodit kak
+# odin element i uhodit v cmake kak imja nesushchestvujushchej celi. Cherez -Command tot zhe vyzov
+# dajot massiv. Skript ne dolzhen zaviset ot togo, kak ego pozvali, poetomu razbor zdes.
+$Targets = @($Targets | ForEach-Object { $_ -split ',' } | Where-Object { $_ -and $_.Trim() } |
+             ForEach-Object { $_.Trim() })
+
+# Zapuskaemost - edinstvennaja proverka, kotoroj mozhno verit. Kody, kotorye stoit uznavat v lico:
+#   -1073741511  tochka vhoda ne najdena: DLL ne sootvetstvuet exe, to est peresobrali polovinu
+#   -1073741515  DLL ne najdena vovse
 function Test-Startable([string]$exe) {
-    if (-not (Test-Path -LiteralPath $exe)) { return "нет файла" }
+    if (-not (Test-Path -LiteralPath $exe)) { return "net fajla" }
     $null = & $exe --version 2>&1
     switch ($LASTEXITCODE) {
         0           { return $null }
-        -1073741511 { return "точка входа не найдена (DLL не соответствует exe)" }
-        -1073741515 { return "DLL не найдена" }
-        default     { return "код выхода $LASTEXITCODE" }
+        -1073741511 { return "tochka vhoda ne najdena (DLL ne sootvetstvuet exe)" }
+        -1073741515 { return "DLL ne najdena" }
+        default     { return "kod vyhoda $LASTEXITCODE" }
     }
 }
 
-function Invoke-Build([string[]]$t, [switch]$c) {
+# Kod vozvrata otdajotsja cherez script-scope, a ne cherez return.
+#
+# V PowerShell funkcija vozvrashchaet VSJO, chto napisala v potok vyvoda, a ne tolko to, chto stoit
+# posle return. Pervaja versija pechatala hvost sborki cherez Say vnutri funkcii - i $rc prihodil
+# massivom iz etih strok plus chislo, tak chto proverka "$rc -ne 0" byla istinnoj pri uspeshnoj
+# sborke. Sborka prohodila, a skript otchityvalsja ob oshibke.
+function Invoke-Build([string[]]$t, [bool]$c) {
     $a = @('--build', $Dir, '--config', 'Release', '-j', "$Jobs")
     foreach ($x in $t) { $a += @('--target', $x) }
     if ($c) { $a += '--clean-first' }
-    & cmake @a 2>&1 | Select-Object -Last 2 | ForEach-Object { Say ("  " + $_) }
-    return $LASTEXITCODE
+    $out = & cmake @a 2>&1
+    $script:BuildRc = $LASTEXITCODE
+    $out | Select-Object -Last 2 | ForEach-Object { Say ("  " + $_) }
 }
 
 $held = $false
 if (-not $NoLock) {
-    Say "беру машину под сборку"
-    if (-not (Take-Machine -Who 'build' -TimeoutMin $LockMin)) { Say "машину не получили"; exit 1 }
+    Say "berjom mashinu pod sborku"
+    if (-not (Take-Machine -Who 'build' -TimeoutMin $LockMin)) { Say "mashinu ne poluchili"; exit 1 }
     $held = $true
 }
 
 try {
-    # Чистая сборка идёт всей цепочкой сразу. Порознь нельзя: между удалением ggml.dll и её
-    # появлением всё, что на неё ссылается, незагружаемо.
+    # Chistaja sborka idjot vsej cepochkoj srazu. Porozn nelzja: mezhdu udaleniem ggml.dll i ejo
+    # pojavleniem vsjo, chto na nejo ssylaetsja, nezagruzhaemo.
     $chain = if ($Clean) { @('ggml','llama') + $Targets } else { $Targets }
-    Say ("собираю: " + ($chain -join ', ') + $(if ($Clean) { " (с чисткой)" } else { "" }))
-    $rc = Invoke-Build $chain -c:$Clean
+    Say ("sobiraju: " + ($chain -join ', ') + $(if ($Clean) { " (s chistkoj)" } else { "" }))
+    Invoke-Build $chain $Clean.IsPresent
+    if ($script:BuildRc -ne 0) { Say ("cmake vernul " + $script:BuildRc); exit $script:BuildRc }
 
-    if ($rc -ne 0) { Say "cmake вернул $rc"; exit $rc }
-
-    # Вот ради чего всё. cmake сказал «успех» — это ещё ничего не значит.
+    # Vot radi chego vsjo. cmake skazal "uspeh" - eto eshchjo nichego ne znachit.
     $bad = @()
     foreach ($t in $Targets) {
-        $exe = Join-Path $bin ($t + '.exe')
-        $why = Test-Startable $exe
-        if ($why) { $bad += "$t : $why" } else { Say "  $t запускается" }
+        $why = Test-Startable (Join-Path $bin ($t + '.exe'))
+        if ($why) { $bad += ($t + " : " + $why) } else { Say ("  " + $t + " zapuskaetsja") }
     }
 
     if ($bad.Count -gt 0) {
-        foreach ($b in $bad) { Say "  НЕ ЗАПУСКАЕТСЯ: $b" }
-        Say "чиню полной пересборкой цепочки — это ровно тот случай, ради которого скрипт написан"
-        $rc = Invoke-Build (@('ggml','llama') + $Targets) -c
-        if ($rc -ne 0) { Say "починка не удалась, cmake вернул $rc"; exit $rc }
+        foreach ($b in $bad) { Say ("  NE ZAPUSKAETSJA: " + $b) }
+        Say "chinju polnoj peresborkoj cepochki - eto rovno tot sluchaj, radi kotorogo skript napisan"
+        Invoke-Build (@('ggml','llama') + $Targets) $true
+        if ($script:BuildRc -ne 0) { Say ("pochinka ne udalas, cmake vernul " + $script:BuildRc); exit $script:BuildRc }
         $still = @()
         foreach ($t in $Targets) {
             $why = Test-Startable (Join-Path $bin ($t + '.exe'))
-            if ($why) { $still += "$t : $why" }
+            if ($why) { $still += ($t + " : " + $why) }
         }
         if ($still.Count -gt 0) {
-            foreach ($s in $still) { Say "  ВСЁ ЕЩЁ НЕ ЗАПУСКАЕТСЯ: $s" }
+            foreach ($s in $still) { Say ("  VSJO ESHCHJO NE ZAPUSKAETSJA: " + $s) }
             exit 1
         }
-        Say "после починки всё запускается"
+        Say "posle pochinki vsjo zapuskaetsja"
     }
-    Say "сборка годна"
+    Say "sborka godna"
 } finally {
-    if ($held) { Free-Machine; Say "машина освобождена" }
+    if ($held) { Free-Machine; Say "mashina osvobozhdena" }
 }
