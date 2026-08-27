@@ -1923,3 +1923,27 @@ Vtoroj shag, teper s izmerennym osnovaniem: **podkachka ne dolzhna zhit na potok
 zhdjot na dzhojne.** Ochered peredachi u karty uzhe svoja, tak chto delo ne v ustrojstve - delo v
 tom, chto batch_end sinhronno zhdjot zabor na tom zhe potoke. Otdelnyj zabor pljus opros vmesto
 ozhidanija (i peredacha vladenija, sm. vyshe) - eto to, chto zamer nazval, a paketirovanie net.
+
+## Rang po verojatnostnoj masse: izmeren i oprovergnut
+
+On the existing code trace (tr_p_code.bin, full distributions, present since 11:26):
+
+       C        LFU   po nedavnosti    po masse     orakul
+       8      33,4%           36,3%       33,1%      59,9%
+      16      49,7%           52,8%       49,0%      85,7%
+      32      69,8%           71,6%       66,7%     100,0%
+      64      87,9%           88,1%       84,5%     100,0%
+
+Ranking by the router's probability mass is **consistently worse than plain LFU** at every capacity.
+This was the strong form of the owner's idea and the one I had kept as the remaining hope for closing
+the oracle gap. Refuted.
+
+The best practical policy is recency-weighted frequency: +3,1 points over LFU at C=16.
+
+**And the frozen-set measurement changes what any of this is worth.** 2,25 points of hit rate cost
+1,55 tok/s in churn. So a policy is only worth having if it is **free in promotions** - recency
+weighting is exactly that (same number of promotions, better chosen). Anything that buys hits by
+promoting more is now known to lose.
+
+Note these hit rates are lower than the 76,2% measured earlier at C=16: that was a mixed-content
+trace, this one is code only. Not comparable across traces, only within.
