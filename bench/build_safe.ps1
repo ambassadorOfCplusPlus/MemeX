@@ -63,6 +63,27 @@ function Test-Startable([string]$exe) {
 # posle return. Pervaja versija pechatala hvost sborki cherez Say vnutri funkcii - i $rc prihodil
 # massivom iz etih strok plus chislo, tak chto proverka "$rc -ne 0" byla istinnoj pri uspeshnoj
 # sborke. Sborka prohodila, a skript otchityvalsja ob oshibke.
+# Proverka DEREVA, a ne celi. Eto to, chego ne hvatalo v pervoj versii.
+#
+# Skript proverjal zapuskaemost tolko teh celej, kotorye sam sobiral - i eto propuskalo glavnoe:
+# derevo obshchee. Sborka odnogo llama-memex-fwd ostavljala llama-cli i llama-moe-trace slomannymi,
+# nikto ih ne proverjal, i otkaz vsplyval cherez chas v chuzhom progone, kotoryj otchityvalsja
+# nulevym fajlom vmesto oshibki. Tak DLL propadali chetyre raza, i tri iz nih ja diagnostiroval
+# zanovo.
+#
+# DLL zdes vazhnee binarnikov: exe bez svoej DLL ne startuet voobshche, a otsutstvie DLL vidno
+# srazu i deshevo, bez zapuska.
+$RequiredDlls = @('ggml.dll','llama.dll')
+
+function Test-Tree {
+    $miss = @()
+    foreach ($d in $RequiredDlls) {
+        if (-not (Test-Path -LiteralPath (Join-Path $bin $d))) { $miss += $d }
+    }
+    if ($miss.Count -gt 0) { return ("net bibliotek: " + ($miss -join ', ')) }
+    return $null
+}
+
 function Invoke-Build([string[]]$t, [bool]$c) {
     $a = @('--build', $Dir, '--config', 'Release', '-j', "$Jobs")
     foreach ($x in $t) { $a += @('--target', $x) }
@@ -89,6 +110,13 @@ try {
 
     # Vot radi chego vsjo. cmake skazal "uspeh" - eto eshchjo nichego ne znachit.
     $bad = @()
+
+    # Snachala derevo celikom: esli net ggml.dll ili llama.dll, slomany VSE binarniki, a ne tolko
+    # te, chto my sobirali. Proverjaetsja do zapuskov, potomu chto deshevle i tochnee nazyvaet
+    # prichinu, chem kod -1073741515 iz kazhdogo exe po ocheredi.
+    $treeWhy = Test-Tree
+    if ($treeWhy) { $bad += ("derevo : " + $treeWhy) }
+
     foreach ($t in $Targets) {
         $why = Test-Startable (Join-Path $bin ($t + '.exe'))
         if ($why) { $bad += ($t + " : " + $why) } else { Say ("  " + $t + " zapuskaetsja") }
@@ -100,6 +128,8 @@ try {
         Invoke-Build (@('ggml','llama') + $Targets) $true
         if ($script:BuildRc -ne 0) { Say ("pochinka ne udalas, cmake vernul " + $script:BuildRc); exit $script:BuildRc }
         $still = @()
+        $treeWhy = Test-Tree
+        if ($treeWhy) { $still += ("derevo : " + $treeWhy) }
         foreach ($t in $Targets) {
             $why = Test-Startable (Join-Path $bin ($t + '.exe'))
             if ($why) { $still += ($t + " : " + $why) }
