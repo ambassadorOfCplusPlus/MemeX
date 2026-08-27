@@ -1365,3 +1365,192 @@ Method note: this is the third prediction written down before measuring and then
 scheduler-contention idea, the promotions-blocking idea, and now this one. All three would have been
 "plausible optimisations we applied and moved on from" without the prediction step. Writing the
 expected number first is what turns a null result into information.
+
+## Dva bjudzheta uzlov, kotorye byli slozheny v odin - i cena uzla v kazhdom
+
+Zadanie stavilo rychag tak: "graf sloja iz 29 uzlov, rezhem hvost MoE s vosmi do odnogo,
+poluchaem okolo 7.4 ms i 15.0 -> 16.5-17". V etom odnom predlozhenii slozheny dve raznye
+velichiny, i posle scheta oni okazalis raznymi na poriadok.
+
+    graf sloja NA KARTE (gpu_static.cpp)   29 uzlov, iz nih 19 dispatchej   7.2 us za dispatch
+    hvost MoE NA HOSTE (build_step)        8 uzlov iz ~27 real'nyh na sloj  MENSHE 1 us za uzel
+
+**Iz 29 uzlov grafa sloja dispatchej tolko 19.** `ggml_vk_is_empty` (ggml-vulkan.cpp:10333)
+vozvrashchaet true dlja NONE / RESHAPE / VIEW / PERMUTE / TRANSPOSE, i graph_compute takoj uzel
+propuskaet celikom - v grafe sloja shest reshape i chetyre view. Naklon 7.2 us izmerjalsja na
+udalenii devjati NASTOJASHCHIH uzlov, znachit eto cena dispatcha, i 29 x 7.2 zavyshaet chlen
+zapuska pochti vdvoe. Predskazanie 19/10 bylo zapisano do progona i sovpalo tochno.
+
+**Hvost MoE k etim 29 otnoshenija ne imeet vovse** - eto uzly hosta. Zamer:
+
+    base tok/s    15.20 (razbros 1.8%, n=3)      base sloj ms  29.65 (0.9%)
+    new  tok/s    15.19 (razbros 1.6%, n=3)      new  sloj ms  29.69 (1.0%)
+    raundy 15.16 / 15.18 / 15.25, kontrolnyj etalon 8.57 / 8.60
+    -------------------------------------------------------------
+    -0.1%, to est nol
+
+Rezalos 336 nastojashchih hostovyh uzlov na tokjen (7 na sloj x 48). Iz razbrosa 1.7% verhnjaja
+granica effekta okolo 1.1 ms, znachit **hostovyj uzel pri n_tokens=1 stoit menshe mikrosekundy**.
+Protiv 7.2 us za dispatch na karte eto raznica na poriadok - i imenno ona ob'jasnjaet, pochemu
+odna i ta zhe pravka "minus sem uzlov" v odnom bjudzhete rychag, a v drugom nichto.
+
+"sloj ms" ne dvinulsja, i eto plecho, kotoroe OBJAZANO ne dvigatsja pri hostovoj pravke
+(pravilo 69). Vmeste s pobitovym sovpadeniem dvuh binarnikov vopros zakryt.
+
+Pravka ostavlena v dereve, potomu chto ona ne pro skorost: `cparams.fused_mmad` po umolchaniju
+true (llama.cpp:7728) i llm_build_moe_ffn beryot ggml_mul_multi_add
+(llama-build-context.cpp:1822), tak chto vosmiuzlovaja cepochka byla napisaniem, kotorogo
+llama_decode ne vypolnjaet.
+
+## Graf sloja, uzel za uzlom: rezat tam bolshe nechego, i eto poschitano
+
+     #  op                        dispatch   zavisit ot     bajty
+     1  FUSED_RMS_NORM attn_norm     da      vhod           8 KB
+     2  MUL_MAT wq                   da      1              4.46 MB
+     3  MUL_MAT wk                   da      1  (ne ot 2)   1.11 MB
+     4  MUL_MAT wv                   da      1  (ne ot 3)   1.11 MB
+     5  RESHAPE q                    NET
+     6  FUSED_RMS_NORM q_norm        da      2              ~0
+     7  ROPE q                       da      6              ~0
+     8  RESHAPE k                    NET
+     9  FUSED_RMS_NORM k_norm        da      3  (ne ot 7)   ~0
+    10  ROPE k                       da      9              ~0
+    11-14 RESHAPE Kc, Vc; VIEW kdst, vdst   NET
+    15  CPY Kc -> kdst               da      10             1 KB
+    16  CPY Vc -> vdst               da      4  (ne ot 15)  1 KB
+    17-19 RESHAPE Q; VIEW K, V       NET
+    20  MUL_MAT kq                   da      15, 7          kesh K
+    21  SOFT_MAX_EXT                 da      20             ~0
+    22  MUL_MAT kqv                  da      21, 16         kesh V
+    23  RESHAPE kqv                  NET
+    24  MUL_MAT wo                   da      22             4.46 MB
+    25  ADD ffn_inp                  da      24             8 KB
+    26  FUSED_RMS_NORM ffn_norm      da      25             8 KB
+    27  MUL_MAT router               da      26             1.05 MB
+    28  CONCAT (ffn_inp, xf)         da      25, 26         16 KB
+    29  CONCAT (.., rl)              da      28, 27         17 KB
+
+Pjat dispatchej nesut 97% bajt, chetyrnadcat ne nesut pochti nichego i platjat te zhe 7.2 us.
+Estestvennyj vyvod "znachit rezhem chetyrnadcat" ne prohodit, i po kazhdomu est prichina:
+
+  - **QKV odnim matumnozheniem (3 -> 1): nevozmozhno.** wq lezhit v iq4_xs, a wk i wv v q8_0;
+    skleit v odin tenzor mozhno tolko odnotipnye. Eto ne voprós usilija.
+  - **Rope na q i k odnim uzlom (2 -> 1):** trebuet, chtoby q i k lezhali sploshnjakom posle
+    svoih raznyh norm; sklejka - eto lishnij uzel, i vyigrysha net.
+  - **Dva concat v konce (2 -> 1):** edinstvennyj realnyj. Esli ne otdavat hostu `xf`, a dat
+    emu poschitat ffn-normu samomu (okolo 2 us na 2048 chisel), ostajotsja odin concat. Minus
+    odin dispatch, pljus odin uzel hosta, kotoryj po zameru vyshe stoit menshe mikrosekundy.
+  - Normy q/k, zapisi v kesh, softmax, ostatochnoe slozhenie - nesokratimy.
+
+**Potolok rezki: 19 -> 18 dispatchej, okolo 0.35 ms na tokjen, 0.5%.** Napravlenie zakryto ne
+"malo obeshchaet", a poschitano.
+
+## Razlozhenie peresechenija, perepisannoe
+
+    podjom                        0.003 ms     0.1 ms/tokjen
+    ustrojstvo (graph_compute)    0.467       22.9
+      zapusk 19 dispatchej          0.137       6.7
+      submit (2.00 na graf)         0.130       6.4
+      propusknaja 10.6 MB           0.081       4.0
+      NEOBJASNENO                   0.119       5.8
+    zabor 16.9 KB                 0.129        6.3
+    ------------------------------------------------
+    vsego                         0.600       29.4 iz 66.6 ms tokjena (44%)
+
+Neobjasnennye 0.119 ms na peresechenie - 5.8 ms na tokjen - krupnee vsego, chto mozhno vzjat
+rezkoj uzlov, i u nih net hozjaina.
+
+## Barjer: gipoteza zadanija oprovergnuta, a cena barjera okazalas vdvoe krupnee
+
+Zadanie prosilo sdelat `ggml_vk_sync_buffers` (ggml-vulkan.cpp:1778) uslovnym, na tom
+osnovanii, chto cepochka iz 32 zavisimyh uzlov i veer iz 32 nezavisimyh izmerilis 1.003x -
+"nichego nikogda ne perekryvaetsja". Eto pravka v 31 meste korrektnostno-kriticheskogo koda.
+
+Vmesto nejo sdelan izmeritel: `GGML_VK_NO_SYNC=1` prevrashchaet barjer v pustyshku. Arifmetika
+pri njom ne verna, i eto namerenno - **prizes uslovnogo barjera ogranichen sverhu tem, chto
+dajot polnoe otsutstvie barjerov**, znachit potolok merjaetsja pjatju strokami vmesto sotni.
+Zond vksplit, izmerenie 1b, 32 uzla po 4 KiB:
+
+    NO_SYNC=0    cepochka 200.23 us (0.6%)   veer 199.72 (0.2%)   otnoshenie 1.003x
+    NO_SYNC=1    cepochka 117.35 us (2.9%)   veer 115.23 (4.1%)   otnoshenie 1.018x
+
+**Gipoteza zadanija oprovergnuta.** Otnoshenie ostalos 1.00 i BEZ barjerov. Znachit "nichego ne
+perekryvaetsja" - eto svojstvo ustrojstva, a ne barjera, i snjatie barjera perekrytija ne
+otkryvaet. Uslovnyj barjer, esli by on byl napisan, ne kupil by togo, radi chego ego prosili.
+
+**No absoljutnaja cena upala na 41%: (200.23 - 117.35) / 32 = 2.59 us na dispatch.** Barjer
+stoit sam po sebe, a ne tem, chto zapreshchaet - eto 36% ot izmerennyh 7.2 us. On polnyj: vse
+stadii, vse dostupy, vkljuchaja transfer read/write, to est na AMD sbros i invalidacija L2
+pered kazhdym dispatchem.
+
+Iz etogo sleduet drugaja pravka, chem prosili. Po potoku dannyh nezavisimyj predshestvennik
+est u chetyrjoh dispatchej iz devjatnadcati (wk, wv, k_norm, cpy V) - eto verhnjaja ocenka, a ne
+schjot po vypushchennomu porjadku: ggml_build_forward_expand vydajot uzly obhodom v glubinu ot
+kcpy, vcpy i out, poetomu sosedjami v linejnom porjadke chashche vsego okazyvajutsja roditel i
+potomok, i realnoe chislo snimaemyh barjerov ne bolshe chetyrjoh. To est uslovnaja versija
+dajot ne bolshe 4 x 2.59 = 10 us na peresechenie: 0.5 ms na tokjen, 0.8%.
+
+A **suzit** barjer - ubrat bity transfer tam, gde ni odna storona ne transfer - primenimo ko
+VSEM barjeram, i vopros tolko v tom, kakuju dolju ot 2.59 us eto vernjot. Ohvat vpjatero
+bolshe pri toj zhe izmerennoj cene, i imenno poetomu sledujushchij instrument -
+GGML_VK_NARROW_SYNC, a ne uslovnyj barjer.
+
+### Potolok, izmerennyj na nastojashchem grafe
+
+Predskazanie do progona: sloj ms 29.69 -> 27.2 (-8.2%), tok/s 15.15 -> 15.6-15.8. Zamer, tri
+raunda vperemezhku s progrevom na vybros:
+
+    sync    tok/s 15.15 (razbros 2.1%)   sloj ms 29.69 (1.0%)   etalon 8.46
+    nosync  tok/s 14.78 (razbros 2.0%)   sloj ms 26.71 (4.2%)   etalon 8.58
+    ---------------------------------------------------------------------
+    sloj ms   -10.0%   predskazano -8.2%   SBYLOS S ZAPASOM
+    tok/s      -2.4%   predskazano +2..+4%  NE ZASCHITYVAETSJA, sm. nizhe
+
+**Barjery stojat 2.98 ms na tokjen - desjatuju chast peresechenija.** Za progon vydano 301 373
+barjera na 192 tokjena i 48 sloev, to est 32.7 na peresechenie pri devjatnadcati dispatchah:
+barjer stavitsja poltora-dva raza na dispatch, i vokrug zapisi vhodov tozhe. Poetomu ocenka
+"19 x 2.59 us = 49 us" byla zanizhena, a nastojashchij chlen okolo 85 us na peresechenie - chto i
+dalo 3 ms vmesto predskazannyh 2.4.
+
+**A vot tok/s v pleche nosync schitat nelzja, i eto otdelnyj urok.** Ono upalo, prichjom vo vseh
+trjoh raundah, i barjer tut ni pri chjom: arifmetika v etom pleche razrushena - 0 iz 192 tokenov,
+L2 140%, a dva shaga iz chetyrjoh dali -1.000000000%, to est chasovoe znachenie "etalon nulevoj"
+(pravilo 11). Nuli i NaN, prishedshie s karty, dalshe schitaet CPU, a denormaly i NaN na AVX2
+medlennee normalnyh chisel. Plecho medlennee POTOMU CHTO nevernoe.
+
+Otsjuda utochnenie k pravilu 73: **zavedomo nevernoe plecho ogranichivaet sverhu tolko te
+velichiny, kotorye ne zavisjat ot znachenij.** sloj ms - eto vremja jader na ustrojstve, ono ot
+dannyh ne zavisit i schitaetsja. tok/s prohodit cherez ekspertnuju polovinu na CPU, ona ot
+dannyh zavisit, i ono ne schitaetsja. Uvidet eto udalos tolko potomu, chto obe velichiny
+snimalis rjadom i razoshlis po ZNAKU; odna velichina dala by uverennyj nevernyj otvet v ljubuju
+iz dvuh storon.
+
+Otdelno stoit zapisat metodicheskoe: **plecho, kotoroe zavedomo nevernó, byvaet deshevle i
+informativnee plecha-kandidata.** Polnoe snjatie barjerov nikuda ne pojdjot, no ono za odin
+progon dalo i oproverzhenie gipotezy, i cenu mehanizma, i verhnjuju granicu vsej vetki. Pisat
+korrektnuju versiju do etogo znachilo by uznat te zhe tri veshchi za den vmesto chasa.
+
+## Chto ja sobirajus delat s "prostaivajushchej kartoj", do togo kak eto pisat
+
+Zamer pola uzhe est i on strannyj: pri vykljuchennoj rezidentnoj polovine peresechenie stoit
+BOLSHE - 0.710 protiv 0.600 ms, raznica 0.131 ms na peresechenie, 6.4 ms na tokjen. Eto pochti
+rovno neobjasnennye 0.119 iz razlozhenija vyshe, i predpolozhenie, kotoroe svjazyvaet oba
+chisla, odno: **eto raskrutka chastot.** Period peresechenija 66.6/49 = 1.36 ms, iz nih karta
+zanjata 0.6, ostalnye 0.76 ms prostaivaet, i upravlenie pitaniem uspevaet sbrosit chastotu. V
+pleche bez ekspertov prostoj dlinnee - i cena rastjot tuda zhe.
+
+Proverka, kotoruju ja predlagaju, i ona ne trebuet planirovshchika: zanjat kartu zavedomo
+dejshjovoj po bajtam rabotoj mezhdu peresechenijami (povtornyj matvektor po uzhe rezidentnomu
+ekspertu, chtoby ne otnimat polosu) i posmotret na "sloj ms".
+
+    esli gipoteza verna    peresechenie 0.600 -> ~0.48, tokjen 66.6 -> 60.8, ~16.4 tok/s
+    esli neverna           napolnitel otnimet polosu i chislo stanet HUZHE srazu
+
+Vtoroj ishod - tozhe otvet, i on prihodit s pervogo progona. Vazhno, chto plecho "huzhe" nelzja
+budet prochitat kak "nedostatochno napolnitelja": imenno poetomu napolnitel objazan byt
+dejshjovym po bajtam, inache dva effekta ne razdeljajutsja.
+
+Chto ja delat NE sobirajus, i pochemu: "vydavat statiku sledujushchego sloja, poka CPU eshcho
+schitaet ekspertov tekushchego". Sloj L+1 nachinaetsja s l_out sloja L, kotoryj est summa
+poloviny karty i poloviny CPU, - to est do konca ekspertov sloja L vydavat nechego. Eto ta zhe
+posledovatelnaja zavisimost, o kotoruju uzhe razbilas ideja s planirovshchikom.
