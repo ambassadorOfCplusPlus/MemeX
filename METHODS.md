@@ -842,3 +842,136 @@ measured.
 требуемое на физический предел. Это то же правило, что поймало «28 % времени не память» (тогда
 не хватило разделить байты на активные параметры и сравнить с самым грубым типом в файле). Второй
 раз та же проверка, и второй раз она не была сделана.
+
+## 58. The reference was wrong in the configuration we were comparing against
+
+Gemma 4 came out of our engine with 414% relative L2 on the logits and none of six decode steps
+matching. Probing the reference's own intra-attention node names on layer 0 gave this, and the
+zeros are exact rather than small:
+
+    attn_norm-0, Qcur-0, Kcur-0, Vcur-0,
+    Qcur_normed-0, Kcur_normed-0,
+    Qcur_roped-0, Kcur_roped-0,
+    kq-0, kq_soft_max_ext-0                 L2 0.0000%   max |d| 0.00000
+    ------------------------------------------------------------------------
+    kqv_merged_cont-0                       L2 139.95%   max |d| 16.07
+    kqv_out-0                               L2 217.66%
+    attn_out-0                              L2 147.95%
+
+Ten consecutive tensors bit-identical, then the first node that reads the V cache. That is not a
+narrowed suspect list, it is a single node - and the node is a `ggml_mul_mat` whose other operand
+was just proven equal to the last bit.
+
+Reading the fork at that node explains it, and the fault is in the fork:
+
+  - `cache.v_trans = !recurrent && !cparams.flash_attn && !hybrid` (llama.cpp:1192). Our
+    comparison sets `flash_attn = false` on purpose - the plain path is the one our graph mirrors
+    node for node - so v_trans is TRUE.
+  - With v_trans true, `llm_build_kv_store` does `v_cur = ggml_transpose(ctx, v_cur)` and copies
+    into a `[n_tokens, n_embd_v_gqa]` strided view. Correct for every architecture that hands it
+    a 2-D V of `[n_embd_v_gqa, n_tokens]`, which is all of them but one.
+  - gemma4 is the exception. Its unweighted V rms_norm needs the per-head shape, so V arrives
+    **3-D** as `[n_embd_head_v, n_head_kv, n_tokens]`. `ggml_transpose` swaps ne0 and ne1 only,
+    giving `[n_head_kv, n_embd_head_v, n_tokens]`.
+  - `ggml_cpy` between tensors of different shape is a FLAT copy - ggml_compute_forward_dup's
+    dst-counter loop walks source and destination each in its own index order and pairs them by
+    linear position. So the order the store writes is not the order the read view expects, and
+    the V cache comes out permuted.
+  - With `flash_attn = true`, v_trans is false, the store is a flat `view_1d`, and the FA read is
+    `[n_embd_head_v, n_kv, n_head_kv]` with matching strides. Store and read agree.
+
+So the fork's gemma4 is correct with flash attention and wrong without it, and every number we
+had was measured against the wrong one. `--ref-fa` now selects the reference's arm explicitly,
+and the A/B - same prompt, same binary, one flag - is the confirmation this entry is still
+waiting on. The one-line fix on the fork's side, not applied here because the reference is shared
+with other work in flight, is to flatten V back to 2-D after the norm.
+
+Three things worth carrying, and the third is the one that cost the time:
+
+**METHODS 16 already said this and it was not applied.** "Before looking for a fault in your own
+code, check the accuracy of the reference." That rule was written for a 5% difference explained by
+f16 KV. It reads as a note about precision. It is not - it is about the reference being a program
+with bugs, and 414% is exactly as much a candidate for it as 5%.
+
+**A chain of exact zeros is a different kind of evidence from a small error.** Eight tensors at
+1e-7 would have meant "close enough, look further downstream". Eight tensors at exactly zero
+means the two implementations are the same computation up to that point, and it makes the next
+node the only possible location. Probing intermediate values is worth doing even when the final
+answer is wildly wrong - especially then.
+
+**The configuration that mirrors the reference most closely is not automatically the one the
+reference is tested in.** `flash_attn = false` was chosen because our graph does attention with an
+explicit softmax, so the comparison would be node for node. That reasoning is sound and it walked
+straight into the fork's least-exercised path. When picking a reference configuration, ask which
+one its author runs, not which one resembles yours.
+
+## 59. The vanishing ggml.dll has a name, and it is another agent's repair
+
+Three times in one morning `ggml.dll` and `llama.dll` disappeared from `build/bin/Release`; once
+`ggml.lib` went too and a link died with LNK1181. METHODS 57 recorded the mechanism by which
+MSBuild fails to notice, and named no cause. The cause was found by listing process command lines
+rather than by reasoning:
+
+    timeout.exe 570 cmake --build build --target ggml --config Release -j 4 --clean-first
+    cmake.exe    --build build --target ggml --config Release -j 4 --clean-first
+
+`--clean-first` deletes the target's outputs before rebuilding, and this is `master.ps1`'s own
+`EnsureBinaries` repair - written after the FIRST time the dll vanished. Two participants each
+noticed missing binaries, each launched the documented repair, and each repair deleted the other's
+artefacts mid-build. Twenty-three of ggml's twenty-seven object files were gone when this was
+caught, so the machine was then busy for half an hour rebuilding what had been there all along.
+
+**The repair does not take the machine lock.** So rule 40 applies with a new participant: the lock
+binds only the scripts that call it, and a repair path added to fix an earlier incident was never
+enrolled. A build that deletes shared outputs is at least as disruptive as a measurement and needs
+the lock more, not less.
+
+Two corrections follow, and they pull in opposite directions on purpose:
+
+**Repairs must be as narrow as the fault.** `--clean-first` on ggml recompiles the iqk kernels for
+half an hour; the fault was a missing link output with all objects intact, which is repaired by
+deleting three `link.*` tlogs and relinking - twelve seconds. A repair broad enough to fix
+anything is broad enough to destroy a neighbour's work.
+
+**A self-healing loop between two agents is worse than no healing.** Each side's repair looked
+correct in isolation and the pair oscillated. Anything that reacts to a broken shared artefact by
+rewriting it has to hold the lock for the rewrite, or it is not a repair, it is a race.
+
+And one thing not to conclude: this does not explain the two historical incidents in the same
+words, because `--clean-first` was written in response to the first of them. What it does say is
+that after this morning, "the dll vanished" should be checked against the process list before any
+mechanism is proposed. I proposed Defender, checked its logs, found nothing, and went on
+suspecting it anyway - the same shape of error as rule 52.
+
+## 58. Лекарство от первой аварии оказалось причиной второй и третьей
+
+Трижды за проект из каталога сборки исчезала `ggml.dll`, и первый раз это стоило ночи. Подпись
+всегда одна: CMake считает цели готовыми, обычная пересборка — пустышка, бинарники падают на
+загрузчике Windows **до первой строки вывода**, логи приходят пустыми, и это читается как «прогон
+не дал данных» вместо «прогон не состоялся».
+
+После первого случая я прописал лекарство: `cmake --build --target ggml --clean-first`. Оно
+работало и записано было как рецепт.
+
+**`--clean-first` сначала удаляет всё, что цель производит, и только потом собирает.** То есть
+между удалением `ggml.dll` и её появлением дерево заведомо сломано, и всё, что на неё ссылается,
+незагружаемо. Если в это окно сборку прервать — а за сутки у нас дважды кончалась сессия и один раз
+отключали свет — дерево остаётся сломанным навсегда, и следующий, кто в него придёт, будет
+диагностировать заново.
+
+Так рецепт от первой аварии стал механизмом второй и третьей. Причём я применил его сегодня ещё
+раз, уже зная про исчезновение, — и снова создал то же окно.
+
+Что из этого следует, помимо частности:
+
+**Лекарство, устраняющее следствие, надо проверять на то, не воспроизводит ли оно причину.**
+Вопрос «а как именно это чинит» я не задал ни разу за три случая — команда работала, и этого
+казалось достаточно.
+
+**Чистить одну цель в многоцелевой сборке нельзя.** Чистка одной цели гарантирует окно, в котором
+остальные ссылаются на удалённое. Либо вся цепочка `ggml → llama → бинарники` целиком, либо ничего.
+
+**И проверять надо запускаемость, а не код возврата сборщика.** Сборка, вернувшая ноль и оставившая
+незагружаемое дерево, хуже упавшей: она отчитывается об успехе, а отказ всплывает через три шага в
+чужой работе. Теперь это делает `bench\build_safe.ps1` — он берёт замок, собирает, запускает каждый
+полученный бинарник с `--version`, и при неудаче сам чинит полной пересборкой цепочки.

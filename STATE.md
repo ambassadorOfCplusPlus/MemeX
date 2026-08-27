@@ -1074,3 +1074,67 @@ machine states.
 
 The clean within-session table from 07:56 stands as a within-session table: 12.95 rtr against 12.32
 mmap, spreads 3.4% and 3.7%. What does not stand is comparing either number to 14.04.
+
+### Gde Gemma na samom dele lomaetsja: eto ne nash graf
+
+The bisection finished. Probing the reference's own intra-attention node names at layer 0, on the
+12-token prompt, gives ten consecutive tensors that are **bit-identical** - exactly zero, not
+small - and then one node that is not:
+
+    attn_norm-0, Qcur-0, Kcur-0, Vcur-0, Qcur_normed-0, Kcur_normed-0,
+    Qcur_roped-0, Kcur_roped-0, kq-0, kq_soft_max_ext-0     L2 0.0000%, max |d| 0.00000
+    kqv_merged_cont-0                                        L2 139.95%, max |d| 16.07
+    kqv_out-0                                                L2 217.66%, max |d| 69.34
+
+`kq_soft_max_ext` being exact is the load-bearing line: it means Q, the cached K, the GQA head
+mapping, the windowed mask and the 1.0 attention scale are all right, to the last bit. The first
+divergence is `kqv` - the single node that reads the V cache - with the other operand proven
+equal.
+
+**The fault is in the fork, in the arm we chose to compare against.** `cache.v_trans` is
+`!flash_attn`, so with `flash_attn = false` the V store goes through
+`v_cur = ggml_transpose(v_cur)` into a `[n_tokens, n_embd_v_gqa]` view. Every architecture but one
+hands that code a 2-D V and it is correct. gemma4 hands it a **3-D** V, because the unweighted V
+rms_norm needs the per-head shape; `ggml_transpose` swaps only ne0 and ne1, and `ggml_cpy`
+between mismatched shapes is a flat linear-index copy, so the cache is written in an order the
+read view does not expect. With `flash_attn = true` the store is a flat `view_1d` and the FA read
+has matching strides, and the pair agrees.
+
+One quantitative corroboration worth keeping, because it was available before any extra run:
+a permutation of a vector's entries leaves the norm alone and destroys the correlation, so
+two vectors that are permutations of one another sit at a relative L2 of exactly sqrt(2) =
+141.42%. The measured `kqv_merged_cont-0` is **139.95%** - within one percent of that, and
+not near any value a wrong scale or a missing normalisation would produce. The report line
+now prints both RMS values beside the error for this reason (METHODS 11): a ratio near 1.0
+with a large L2 says "same size, pointing elsewhere", which is a permutation, and a ratio
+far from 1.0 says a scale is missing. Those are different bugs and L2 alone cannot separate
+them.
+
+`--ref-fa` now picks the reference's arm. The A/B - same prompt, same binary, one flag - is what
+turns this from a strong reading of the source into a measurement, and it is queued. Until it
+runs, this is a diagnosis and not a result.
+
+**What it already changes regardless of the A/B:** every Gemma number in the section above was
+measured against a reference that is wrong in that configuration, so none of them describes our
+engine's accuracy. The 414% and the 0-of-6 tokens are not evidence about our graph. And the same
+question now hangs over any perplexity or token-match number this project has ever taken for
+gemma4 with `-fa off`, which is the flag METHODS recommends on this CPU.
+
+### Pochemu ggml.dll ischezala: nazvano po spisku processov
+
+METHODS 57 described how MSBuild fails to notice a missing link output and named no cause.
+The cause is another participant running
+
+    cmake --build build --target ggml --config Release -j 4 --clean-first
+
+without the machine lock. That is `master.ps1`'s own `EnsureBinaries` repair, written after the
+first time the dll vanished. `--clean-first` deletes the target's outputs, so two agents each
+detecting "binaries missing" and each running the documented repair delete each other's
+artefacts; one of my links died with LNK1181 on a `ggml.lib` that was removed while it was being
+read. Twenty-three of ggml's twenty-seven objects were gone by the time this was caught, so the
+machine then spent half an hour rebuilding what had been there.
+
+Two fixes, and they need each other: the repair must take the lock (rule 40, with a participant
+nobody enrolled), and it must be as narrow as the fault - deleting three `link.*` tlogs and
+relinking takes twelve seconds against `--clean-first`'s half hour, and the objects were never
+the problem.

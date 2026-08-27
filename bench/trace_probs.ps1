@@ -29,6 +29,8 @@ if (-not (Take-Machine -Who 'trace_probs' -TimeoutMin 600 -MinFreeGB 16)) { Note
 Note ('vladeem: ' + (Get-LockHolder))
 try {
     Say 'zapis trassy s polnymi raspredelenijami marshrutizatora'
+    # Staryj fajl udaljaetsja do progona, inache ego nalichie posle progona nichego ne dokazyvaet.
+    if (Test-Path $OUT) { Remove-Item $OUT -Force -EA SilentlyContinue }
     $env:MOE_TRACE_OUT   = $OUT
     $env:MOE_TRACE_PROBS = '1'
     $exe = "$BIN" + [char]92 + "llama-moe-trace.exe"
@@ -38,7 +40,13 @@ try {
         -no-fmoe -no-fug --seed 1 *> 'D:\MemeX\results\trace_run.log'
     Remove-Item Env:MOE_TRACE_PROBS -EA SilentlyContinue
     Remove-Item Env:MOE_TRACE_OUT   -EA SilentlyContinue
-    if (Test-Path $OUT) {
+    # Nalichie fajla ne est zapis. Nulevoj fajl ot proshlogo raza lezhal na meste, Test-Path ego
+    # nashjol, i skript otchitalsja ob uspehe - a analiz potom skazal "trassa pusta". Tot zhe klass
+    # oshibki, chto "razmer ne est celostnost" posle otkljuchenija sveta: proverjalos sushchestvovanie
+    # tam, gde nuzhna byla prigodnost.
+    if (Test-Path $OUT) { Remove-Item $OUT -Force -EA SilentlyContinue }
+    # ... zapusk vyshe perepisyvaet fajl; posle nego proverjaem razmer, a ne fakt nalichija
+    if ((Test-Path $OUT) -and ((Get-Item $OUT).Length -gt 1MB)) {
         Note ('trassa zapisana: {0:N1} MB' -f ((Get-Item $OUT).Length/1MB))
     } else {
         Note 'trassa ne zapisalas:'
