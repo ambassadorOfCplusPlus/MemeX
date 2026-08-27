@@ -164,6 +164,17 @@ if (-not $External) {
 try {
     Say ("A/B hvosta MoE: rezhim $Mode, raundov $Reps, --gen $Ngen, --tokens $Tokens, t=$Threads")
     for ($r = 1; $r -le $Reps; $r++) {
+        # Progrev na vybros. Pervaja zagruzka 15 GB s diska i pervoe zapolnenie stranichnogo
+        # kesha dostajutsja celikom pervomu plechu pervogo raunda, i perestanovka porjadka
+        # etogo NE lechit: ona lechit sistematicheskij naklon, a ne odnokratnyj vybros v
+        # nachale. Bez nejo pervyj progon etogo skripta dal raund 1 = 14.04 protiv raunda
+        # 2 = 15.28, i vsja raznica plech okazalas raznicej raundov.
+        if ($r -eq 1) {
+            Say 'progrev: odna zagruzka na vybros, chisla iz nejo ne idut nikuda'
+            $w = RunOnce $SBASE 'warm' $extra 900
+            if ($w.err -ne '') { Note ('progrev NE POSHJOL: ' + $w.err) }
+            else               { Note ('progrev: {0:N2} tok/s - VYBROSHENO' -f $w.gen) }
+        }
         $order = if ($r % 2 -eq 1) { $arms } else { $arms[($arms.Count-1)..0] }
         $thisRound = @()
         foreach ($arm in $order) {
