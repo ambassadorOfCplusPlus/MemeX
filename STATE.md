@@ -1769,3 +1769,157 @@ nothing to win here, which is worth knowing precisely because it looked like the
 
 Running now: the budget sweep down to a frozen set - the counterintuitive test. If the shared-host-
 bandwidth mechanism is right, the token gets faster while the hit rate gets worse.
+
+## Paketirovanie podkachek: predskazanie oprovergnuto, i ono pjatoe
+
+Zadanie prosilo drenirovat ochered podkachek v odin paket i predskazyvalo 13,04 -> 5,5-6,5 ms na
+potoke karty, tokjen 66,0 -> 60-62, to est 16,1-16,5 tok/s. Sdelano (worker_loop berjot do
+promo_drain_ podkachek za prohod pod odin submit i odin zabor), zamereno tremja raundami
+vperemezhku s kontrbalansom, progrev na vybros. Korrektnost snjata do skorosti: 192 iz 192
+tokenov v kazhdom pleche, 48 slotov videopamjati sverjeny s modelju POSLE generacii - 0
+rashozhdenij.
+
+    plecho    na paket   promo_ms/tok   zhdjom/tok   sloj ms   tok/s
+    drain1      1,000       8,960         11,530     29,630    15,242  (razbros 0,5%)
+    drain8      6,765       8,260         15,076     27,363    14,918  (razbros 0,8%)
+
+**Mehanizm rabotaet rovno kak zadumano i vremeni eto ne pokupaet.** Paket sobralsja iz 6,77
+podkachek (predskazano 6-8), zaborov v shest raz menshe, no podkachki na potoke karty upali
+tolko na 7,8% - a ne vdvoe, - i ZHDJOM VYROSLO na 30,8%. Tokjen -2,1%.
+
+Prichina rosta ozhidanija mehanicheskaja i ejo stoit zapisat: dispatch, prishedshij poka idjot
+paket, stoit za VSEM paketom vmesto odnoj podkachki. Priem obmenjal chislo zaborov na
+dlitelnost uderzhanija potoka, a CPU platit imenno za uderzhanie. Poetomu napisano tretje plecho
+- paket zakryvaetsja srazu, kak tolko dispatch zhdjot (MEMEX_PROMO_YIELD):
+
+    drain1      1,000       8,975         11,403     29,650    14,976  (razbros 0,4%)
+    drain8      6,765       8,276         15,275     27,220    14,702  (razbros 0,2%)
+    drain8y     2,294       8,553         14,198     27,210    14,945  (razbros 0,1%)
+
+Ustupka vozvrashchaet tokjen k baze i ne obgonjaet ejo: -0,2% protiv drain1 pri razbrosah
+0,1-0,4%. **Vetka paketirovanija zakryta: v luchshem sluchae nol.** Mehanizm ostavlen za
+MEMEX_PROMO_DRAIN (po umolchaniju 1, to est predrenazhnoe povedenie), potomu chto vmeste s
+menshim bjudzhetom on mozhet vyjti v pljus, a perepisyvat ego zanovo dorozhe, chem hranit.
+
+### Baza byla nevernoj na 46%, i oshibka byla v znamenatele
+
+13,04 ms/tokjen - eto ves ms_promote, delennyj na n_gen, vkljuchaja **pervichnuju zalivku
+videopamjati**: 576 ekspertov, 1,44 GB, 775 ms, kotorye ni odin sgenerirovannyj tokjen ne
+platil. Na generacii podkachki zanimajut potok karty **8,96 ms/tokjen**, i odna podkachka stoit
+**1,30 ms**, a ne 1,89 - potomu chto 13,04 / 6,9 delilo total S zalivkoj na rate BEZ nejo.
+
+Iz etogo srazu sleduet, chto ostatok byl pereocenjon: 1,30 izmerennyh protiv 0,74 objasnjonnyh
+(0,10 chtenie fajla + 0,64 PCIe) - to est neobjasnjonnogo 0,56 ms, a ne 1,15. I paketirovanie
+nashlo iz nih rovno 0,10: 1,300 -> 1,196 ms na podkachku pri shesti podkachkah pod odnim
+zaborom. **Submit s zaborom stoil 0,10 ms na podkachku, a ne 1,15.** Ostajutsja 0,45 ms, i
+sledujushchij instrument - zamerit read_plain otdelno, potomu chto eto edinstvennyj neizmerennyj
+chlen.
+
+Ispravleno v otchjote: ms_promote i promotions teper snimajutsja v bazu posle zalivki i
+vychitajutsja, cena zalivki pechataetsja otdelno svoej strokoj.
+
+## Otchjot pechatal teoreticheskoe i sudil po nemu, imeja izmerennoe na ekrane
+
+Dvizhok pechatal "17,3 MB po PCIe pri 3,94 GB/s = 4,4 ms/tokjen" i dvadcatju strokami nizhe
+"podkachki zanjali potok karty 13,04 ms/tokjen", a prigovor "podkachka sama sebja oplachivaet"
+schitalsja **po teoreticheskim 4,4**. Oba chisla byli na ekrane sutki.
+
+Teper obe velichiny stojat na sosednih strokah, i prigovor chitaet izmerennuju, nazyvaja, kakuju
+imenno on prochital:
+
+    podkachek 6,9 na tokjen = 17,3 MB po PCIe pri 3,94 GB/s = 4,4 ms/tokjen TEORETICHESKI
+    IZMERENO na potoke karty: 8,9 ms/tokjen, 17,3 MB/tokjen, to est 1,94 GB/s - 0,49 ot kanala
+      izbytok nad kanalom 4,5 ms/tokjen; paketov 1326 na 1326 podkachek = 1,00 na paket
+    ... podkachki stojat 8,9 ms (IZMERENO) - menshe, to est podkachka sama sebja oplachivaet
+
+Prigovor ne peremenilsja (27,8 ms sekonomleno protiv 8,9 potracheno), no teper on stoit na tom
+chisle, kotoroe otnositsja k delu.
+
+## Semejstva ocheredej RX 6500 XT: DMA est, i podkachka UZHE na njom
+
+Perechisleno, ne predpolozheno (print_queues, syroj Vulkan, po obrazcu print_placement):
+
+    semejstv ocheredej: 4
+      semejstvo 0: ocheredej 8, 0x0f GRAPHICS COMPUTE TRANSFER SPARSE, metki 64 bit, gran 1x1x1
+      semejstvo 1: ocheredej 4, 0x0e COMPUTE TRANSFER SPARSE,          metki 64 bit, gran 1x1x1
+      semejstvo 2: ocheredej 1, 0x0c TRANSFER SPARSE,                  metki 64 bit, gran 16x16x8
+      semejstvo 3: ocheredej 1, 0x20 (video decode),                   metki 0 bit
+      vybor ggml: schjot - semejstvo 1, peredacha - semejstvo 2 = RAZNYE OCHEREDI
+
+**Semejstvo tolko-peredachi est, i ggml uzhe ego vybiraet.** ggml_vk_find_queue_family_index
+(ggml-vulkan.cpp:1585) ishchet TRANSFER, izbegaja COMPUTE i GRAPHICS, a nash paket zapisyvaetsja
+v ctx->transfer_cmd_pool, kotoryj postroen na device->transfer_queue (ggml-vulkan.cpp:4162). To
+est kopija uzhe idjot cherez DMA i uzhe perekryvaetsja so schjotom **na urovne ustrojstva**.
+
+Znachit "vynesti podkachku na ochered peredachi" - uzhe sdelano, i ostavshajasja serializacija ne
+v ocheredi, a **na hoste**: batch_end delaet ggml_vk_submit i tut zhe ggml_vk_wait_for_fence, a
+tot (ggml-vulkan.cpp:1294) posle almost_ready **krutitsja v YIELD-cikle**, a ne spit. To est
+potok karty ne prosto zanjat - on zhzhjot jadro, kotoroe nuzhno processornoj polovine.
+
+Chto ponadobitsja, esli delat podkachku po-nastojashchemu asinhronnoj (i chego sejchas net):
+  - **svoj zabor.** ctx->fence odin na vsjo, i graph_compute signalit ego zhe. Bez otdelnogo
+    zabora (ili timeline-semafora) nelzja otlichit "doshjol paket" ot "doshjol graf".
+  - **peredacha vladenija mezhdu semejstvami.** Bufery sozdajutsja VK_SHARING_MODE_EXCLUSIVE, a
+    ggml_vk_sync_buffers stavit obychnyj barjer BEZ src/dstQueueFamilyIndex. To est zapis
+    semejstvom 2 i chtenie semejstvom 1 formalno dajot neopredeljonnoe soderzhimoe uzhe sejchas;
+    rabotaet ono potomu, chto batch_end sinhroniziruet na hoste do vozvrata. Uberjom hostovoe
+    ozhidanie - i nuzhen libo CONCURRENT, libo para release/acquire. Eto latentnyj defekt v
+    dereve, a ne sledstvie nashih pravok.
+  - **otlozhennaja aktivacija gejtitsja imenno na zabore.** Maska ne dolzhna perevorachivatsja
+    ranshe signala, i signal pridjot iz drugoj ocheredi.
+
+## Zamorozhennyj nabor bystree churnujushchego na 10,5%, i eto krupnyj vyvod
+
+Svip bjudzheta, dva povtora, kontrbalans, progrev na vybros. Korrektnost v kazhdom pleche: 192
+iz 192 tokenov, 48 slotov videopamjati sverjeny s modelju posle generacii - 0 rashozhdenij.
+
+    plecho    podkachek/tok  popadanij  promo_ms/tok  CPU/tok  zhdjom/tok  sloj ms  tok/s
+    budget8       6,906       71,57%       8,998      16,460    11,340    29,715   14,798
+    budget2       6,719       71,43%       8,716      15,688    11,367    29,685   15,051
+    frozen        0,000       69,32%       0,000      16,421     7,390    27,710   16,347
+
+Razbrosy 0,0-2,8%, po tok/s 0,1-1,1%.
+
+**Nol podkachek - samoe bystroe plecho, +10,5% k tokjenu, a popadanija terjajut vsego 2,25
+punkta.** Nabor, sobrannyj promptom, za 192 sgenerirovannyh tokena pochti ne ustarevaet - eto
+soglasuetsja s ranee izmerennoj ustojchivostju (dolja sovpadenija ne padaet s k: 47,8% na k=1 i
+52,3% na k=20). Churn pokupaet 2,25 punkta popadanij i stoit 1,55 tok/s.
+
+**Bjudzhet - ne tot rychag.** budget 2 pochti ne svjazyvaet: 6,72 podkachki na tokjen protiv 6,91,
+potomu chto on dejstvuet POSLOJNO i POREFRESHNO, a LFU prosit menshe dvuh na sloj za obnovlenie.
++1,7%, i eto vsjo, chto iz nego mozhno vyzhat. Rychag - period obnovlenija ili zamorozka, a ne
+bjudzhet.
+
+### Gipoteza polosy OZU predskazala VERNOE NAPRAVLENIE i oproverglas na svojom sobstvennom stolbce
+
+Gipoteza byla: karta i processor deljat polosu ozu, podkachka otnimaet ejo u processornoj
+poloviny, i poetomu vsjo, chto delaet obrashchenija karty agressivnee, uskorjaet sloj i
+zamedljaet tokjen. Ejo sobstvennoe predskazanie: pri nule podkachek **processornaja polovina
+dolzhna stat bystree**.
+
+Ona ne stala: CPU/tok 16,460 -> 16,421 pri razbrosah 2,8% i 1,1%. To est nol.
+
+A dvinulos drugoe: ZHDJOM 11,340 -> 7,390 (-3,95 ms) i sloj 29,715 -> 27,710 (-2,0 ms). Summa
+5,95 ms protiv 6,41 ms, na kotorye realno ukorotilsja tokjen (67,58 -> 61,17 ms). To est
+**vyigrysh polnostju objasnjaetsja zanjatostju POTOKA karty, i chlen polosy ne nuzhen vovse.**
+
+Eto tot zhe diagnoz, chto uzhe stojal v STATE ("podkachki zanjali potok karty"), tolko teper on
+podtverzhdjon plechom, kotoroe ubiraet podkachki celikom, a ne uskorjaet ih.
+
+**I "dvazhdy podrjad sloj bystree, tokjen medlennee" - ne pravilo.** Iz dvuh sluchaev odin
+neschitaem: v pleche bez barjerov arifmetika razrushena (0 iz 192 tokenov), i tok/s ottuda
+ne zaschityvaetsja (pravilo 73). A frozen dajot sloj bystree I tokjen bystree odnovremenno. To
+est znak sovpal odin raz iz dvuh validnyh nabljudenij, i mehanizm u nih odin - potok, a ne bus.
+
+### Chto iz etogo delat, i chego ne delat
+
+Zamorozka naveki - eto zamer, a ne konstrukcija: nabor ustarel by na dlinnoj generacii i na
+smene temy (sdvig raspredelenija u nas izmeren - nabor s koda na russkom berjot 24,1% protiv
+25,0% u sluchajnogo). Deshjovyj sledujushchij shag - **period obnovlenija**: sejchas 3 tokena, a
+ustojchivost govorit, chto 32-64 hvatit. Eto dajot bolshuju chast +10,5% i sohranjaet adaptaciju,
+i merjaetsja odnim flagom, kotoryj uzhe est (--resident-period).
+
+Vtoroj shag, teper s izmerennym osnovaniem: **podkachka ne dolzhna zhit na potoke, kotorogo CPU
+zhdjot na dzhojne.** Ochered peredachi u karty uzhe svoja, tak chto delo ne v ustrojstve - delo v
+tom, chto batch_end sinhronno zhdjot zabor na tom zhe potoke. Otdelnyj zabor pljus opros vmesto
+ozhidanija (i peredacha vladenija, sm. vyshe) - eto to, chto zamer nazval, a paketirovanie net.
