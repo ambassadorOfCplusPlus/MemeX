@@ -1721,3 +1721,35 @@ tokjen paketov stanet 1-2 vmesto 6.9, i esli ostatok 1.15 ms dejstvitelno submit
 
 Esli ne dvinetsja - ostatok ne v submitah, i togda merit read_plain otdelno. Chitat nado
 "podkachki zanjali potok karty" i "paketov", a ne tok/s: pervye dva u nih razbros pod procentom.
+
+## Dva oprovergnutyh predskazanija delят odin mehanizm: polosa hostovoj pamjati
+
+    paketirovanie podkachki:  sloj 29,63 -> 27,36 ms (-7,7%),  tokjen 15,242 -> 14,918 (-2,1%)
+    snjatie barjerov:         sloj 29,69 -> 26,71    (-10,0%), tokjen 15,15  -> 14,78  (-2,4%)
+
+Twice in a row, two independent changes: **the card's layer work got faster and the token got
+slower**, by similar amounts. That is a mechanism, not a coincidence.
+
+The candidate that fits everything measured: **the card and the CPU share host memory bandwidth, and
+the CPU half is bandwidth-bound.** The prefetch reads host RAM (mmap -> pinned -> PCIe); the CPU's
+expert half reads host RAM. The CPU half was separately measured to get *faster* with fewer threads,
+which is the signature of a memory-bound workload rather than a core-bound one. So anything that makes
+the card's host access more aggressive takes bandwidth from the CPU half, which is on the critical
+path. Batching bursts the transfers; removing barriers lets reads issue sooner; both raise
+instantaneous pressure on the same bus.
+
+**This reframes where the +25% comes from.** We assumed the card being fast. If this holds, it is
+because the card *removes host-RAM reads* - and prefetch traffic adds them back. The scheme wins by
+subtraction, not by the device's speed.
+
+The test is counterintuitive and is queued: **reduce the promotion budget**, sweeping down to a frozen
+set. If the mechanism is real, the token gets faster while the hit rate gets worse - two figures moving
+in opposite directions, which is hard to explain any other way. If the frozen-set arm is fastest, that
+is a large and unwelcome conclusion about the resident-set design, and it should be measured rather
+than argued.
+
+Five predictions now written down before measuring and refuted: scheduler contention, promotions
+blocking the worker, fusing the MoE tail, removing the barriers, batching the prefetch. The value was
+never in any one of them being right - it is that two of the five turned out to share a cause, and
+that only became visible because both were recorded with numbers instead of being applied and
+forgotten.
