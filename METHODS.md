@@ -689,3 +689,59 @@ one is about which measurements even have the problem.
 диагностики.** Я потратил вечер на объяснения — конкуренция со сборкой, обнуление страниц, прогрев
 кеша, — имея нулевую видимость в чужой процесс. Сосед знал ответ с самого начала и назвал его, как
 только его спросили.
+
+## 55. Start-Process -PassThru returns an EMPTY exit code, and empty is not zero
+
+The build harness waited 5.5 minutes for the machine, compiled a working binary, printed
+`build exit  za 0,2 min` with nothing where the number goes, declared `sborka upala`, and gave
+the lock back. The neighbour took the machine two minutes later. Nothing was wrong with the
+build; the exe is on disk with the right timestamp and runs.
+
+`Start-Process -PassThru` hands back a `Process` object with no cached OS handle. Once the
+process exits there is nothing left to read the code from, so `.ExitCode` comes back as
+`$null`. Reading `.Handle` before waiting is what makes the object keep it. Reproduced rather
+than assumed, with the same command three ways:
+
+    Start-Process cmake --version -PassThru, WaitForExit(30000)          -> ExitCode []
+    the same, plus a parameterless WaitForExit()                         -> ExitCode []
+    the same, with `$null = $proc.Handle` before the wait                -> ExitCode [0]
+    a deliberately failing cmake, with the Handle line                   -> ExitCode [1]
+
+The parameterless-WaitForExit workaround that is usually quoted for this does NOT fix it here;
+only touching `.Handle` does.
+
+What makes this expensive rather than merely annoying is the comparison it feeds. `$null -ne 0`
+is **true** in PowerShell, so every caller that tests `if ($code -ne 0) { failed }` reports a
+failure for a step that succeeded. The failure is silent in both directions: a step that really
+did fail also reports failure, so the harness looks like it is working right up until it throws
+away good work. Any step in this repo that reports a result it never received now says so
+explicitly (`ExitCode pust - schitaem otkazom`) instead of folding into the failure branch.
+
+The general form, and it is the same shape as rule 44: a check that cannot get its input must
+say it has no answer. Silently substituting a value that happens to compare unfavourably turns
+"I do not know" into "it failed", and those need different responses.
+
+## 56. One name in the reference can mean two different tensors, and by layer
+
+Our per-layer comparison probes the reference by node name. On gemma4 it reported 100-500%
+relative L2 on `attn_out` for layer after layer, which reads exactly like a broken attention
+block and points the search at the graph.
+
+The graph was fine. The reference emits the name `attn_out` from two places in the same model:
+
+  * the 25 layers that have their own `attn_v` go through `build_std_attention`, which does
+    `cb(cur, "attn_out", il)` and adds the residual on the NEXT line
+    (llama-build-context.cpp:3696) - so its `attn_out` is pre-residual;
+  * the 5 layers without `attn_v` are built inline in `build_gemma4`, which adds the residual
+    first and names the sum (build_gemma4.cpp:1021) - post-residual.
+
+So on 25 layers of 30 the comparison was measuring "attention output plus residual" against
+"attention output", and reporting the residual as an error. Qwen3.6 has the same trap for the
+same reason: build_qwen35 also passes `add_input=true`.
+
+Rule 9 in this file already says to match node names exactly rather than by prefix. This is the
+next question after that one: an exact name match is only worth what the assumption behind it is
+worth, and the assumption is that a name denotes one quantity. Before trusting a by-name
+comparison, find every `cb(..., "thatname", ...)` in the reference and check they are the same
+thing. Where they are not, the probe has to switch with them - ours now picks the pre-residual
+tensor on layers that have `wv` and the post-residual one on layers that do not.
