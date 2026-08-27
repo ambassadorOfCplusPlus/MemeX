@@ -73,15 +73,57 @@ function Test-Startable([string]$exe) {
 #
 # DLL zdes vazhnee binarnikov: exe bez svoej DLL ne startuet voobshche, a otsutstvie DLL vidno
 # srazu i deshevo, bez zapuska.
-$RequiredDlls = @('ggml.dll','llama.dll')
+$RequiredDlls = @('ggml.dll','llama.dll','ggml-base.dll','mtmd.dll')
 
 function Test-Tree {
     $miss = @()
-    foreach ($d in $RequiredDlls) {
+    foreach ($d in @('ggml.dll','llama.dll')) {
         if (-not (Test-Path -LiteralPath (Join-Path $bin $d))) { $miss += $d }
     }
     if ($miss.Count -gt 0) { return ("net bibliotek: " + ($miss -join ', ')) }
     return $null
+}
+
+# ------------------------------------------------------------------ hranilishche bibliotek
+#
+# Vosstanovlenie iz kopii - sekundy protiv desjati minut peresborki, i imenno poetomu ono opasno:
+# STARAJA DLL protiv NOVOGO exe dajot -1073741511 "tochka vhoda ne najdena", a eto otkaz huzhe
+# otsutstvija. Ne startuet tak zhe, no prichina vygljadit inache i iskat ejo budут v kode.
+#
+# Poetomu dva pravila, i oba objazatelny:
+#   1. Kopija snimaetsja TOLKO posle togo, kak sborka proverena na zapuskaemost. Nikogda "na vsjakij
+#      sluchaj" i nikogda do proverki - inache v hranilishche ljazhet to zhe slomannoe derevo.
+#   2. Posle vosstanovlenija proverka zapuskaemosti prohoditsja ZANOVO, i esli ne proshla - kopija
+#      objavljaetsja negodnoj i idjot polnaja peresborka. Hranilishche - bystryj put, a ne istina.
+#
+# Rjadom s kopiej lezhit metka: kommit, iz kotorogo sobrano, i vremja. Ona ne uchastvuet v reshenii
+# (reshaet zapuskaemost), no bez nejo nevozmozhno ponjat, chto imenno lezhit v hranilishche.
+$vault = 'D:/MemeX/dll_vault'
+
+function Save-Vault {
+    New-Item -ItemType Directory -Path $vault -Force -EA SilentlyContinue | Out-Null
+    $n = 0
+    foreach ($d in $RequiredDlls) {
+        $src = Join-Path $bin $d
+        if (Test-Path -LiteralPath $src) { Copy-Item -LiteralPath $src -Destination $vault -Force -EA SilentlyContinue; $n++ }
+    }
+    $head = (& git -C 'D:/MemeX/src/ik_llama.cpp' rev-parse --short HEAD 2>$null)
+    ("kommit " + $head + ", snjato " + (Get-Date -Format 'yyyy-MM-dd HH:mm') + ", bibliotek " + $n) |
+        Set-Content -LiteralPath (Join-Path $vault 'metka.txt') -Encoding UTF8
+    Say ("  kopija bibliotek obnovlena: " + $n + " sht")
+}
+
+function Restore-Vault {
+    if (-not (Test-Path -LiteralPath $vault)) { return $false }
+    $n = 0
+    foreach ($d in $RequiredDlls) {
+        $src = Join-Path $vault $d
+        if (Test-Path -LiteralPath $src) { Copy-Item -LiteralPath $src -Destination $bin -Force -EA SilentlyContinue; $n++ }
+    }
+    if ($n -eq 0) { return $false }
+    $m = if (Test-Path -LiteralPath (Join-Path $vault 'metka.txt')) { (Get-Content -LiteralPath (Join-Path $vault 'metka.txt') -Raw).Trim() } else { 'bez metki' }
+    Say ("  vosstanovleno iz kopii: " + $n + " sht (" + $m + ")")
+    return $true
 }
 
 function Invoke-Build([string[]]$t, [bool]$c) {
@@ -124,6 +166,24 @@ try {
 
     if ($bad.Count -gt 0) {
         foreach ($b in $bad) { Say ("  NE ZAPUSKAETSJA: " + $b) }
+
+        # Snachala bystryj put: vosstanovit biblioteki iz kopii i proverit zanovo. Eto sekundy
+        # protiv desjati minut, i esli propali imenno DLL - a imenno oni propadali vse chetyre
+        # raza - togo dostatochno. Esli posle vosstanovlenija vsjo eshchjo ne startuet, kopija
+        # negodna (staraja DLL protiv novogo exe), i idjot polnaja peresborka.
+        if (Restore-Vault) {
+            $after = @()
+            $treeWhy = Test-Tree
+            if ($treeWhy) { $after += ("derevo : " + $treeWhy) }
+            foreach ($t in $Targets) {
+                $why = Test-Startable (Join-Path $bin ($t + '.exe'))
+                if ($why) { $after += ($t + " : " + $why) }
+            }
+            if ($after.Count -eq 0) { Say "kopija podoshla, peresborka ne nuzhna"; Say "sborka godna"; exit 0 }
+            foreach ($a in $after) { Say ("  posle vosstanovlenija vsjo eshchjo: " + $a) }
+            Say "kopija ne podoshla - sobiraju polnostju"
+        }
+
         Say "chinju polnoj peresborkoj cepochki - eto rovno tot sluchaj, radi kotorogo skript napisan"
         Invoke-Build (@('ggml','llama') + $Targets) $true
         if ($script:BuildRc -ne 0) { Say ("pochinka ne udalas, cmake vernul " + $script:BuildRc); exit $script:BuildRc }
@@ -140,6 +200,7 @@ try {
         }
         Say "posle pochinki vsjo zapuskaetsja"
     }
+    Save-Vault
     Say "sborka godna"
 } finally {
     if ($held) { Free-Machine; Say "mashina osvobozhdena" }

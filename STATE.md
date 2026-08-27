@@ -1238,3 +1238,28 @@ odin neizmennyj binarnik za sutki daval 11.99 / 13.38 / 12.95 / 12.21.
 
 Sostojanie na moment zapisi: golova na karte daet +4.0% (12.12 -> 12.61). Eto odna tret pervoj
 chasti iz chetyrjoh.
+
+## Rost rashozhdenija s glubinoj: ne nash, i karta drejfuet menshe
+
+The static-on-card path showed L2 growing monotonically with depth - 0.4667% at layer 42, 0.9954% at
+layer 46, logits 2.58-6.91% - while 6 of 6 generated tokens matched the reference. That is exactly
+the signature of the float-reassociation bug this project already had once (2.5e-8 at layer 1
+becoming 1.6% by layer 47, with every token still matching), so it could not be waved through.
+
+A CPU-versus-card comparison cannot settle it: growing divergence is equally consistent with "the
+card is more accurate at every layer and the CPU's own error accumulates" and with "our split
+reassociates sums and *our* error accumulates". The measurement that separates them is the growth
+rate of each path measured separately:
+
+    processor   pervaja polovina sloev 3.7867%   vtoraja 5.2035%   otnoshenie 1.37
+    karta       pervaja polovina       3.8461%   vtoraja 4.9745%   otnoshenie 1.29
+
+**Both paths drift with depth, and the card drifts less.** So the growth is inherent to the
+computation, not introduced by us, and the widening gap between the two paths is the two error
+sources accumulating at different rates. If our folding were reassociating, the card's ratio would
+be the *higher* of the two; it is the lower.
+
+Worth keeping as a method: when a difference between two implementations grows with depth, comparing
+them to each other tells you nothing about which one is drifting. Measure the growth rate of each
+against a common reference. The sign of the difference in growth rates is the answer, and it is
+cheap - the same probes, one extra pass.
