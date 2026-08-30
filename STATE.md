@@ -1997,7 +1997,24 @@ Chego eto NE govorit: sravnenija pri RAVNOM chisle podkachek zdes net, a imenno 
 li rabota v dvizhke. Kurs izmeren i zhestok - 2.25 punkta popadanij, kuplennye tekuchkoj, stoili
 1.55 tok/s.
 
-Vtoroe utochnenie, k moej sobstvennoj formulirovke: uprezhdenie snimaet SROCHNOST, a ne CENU. Iz
-1.300 ms na podkachku 0.637 - eto shina, a 0.949 - otpravka i ozhidanie otmetki, to est rabota na
-potoke, kotoraja tratitsja nezavisimo ot togo, zhdjot li ejo kto-nibud. Kolonka "3.5 obrashchenija"
-dostizhima tolko posle asinhronnoj peredachi na ocheredi DMA so svoej otmetkoj - a ejo net.
+ISPRAVLENIE, i ono moe. Ja napisal "iz 1.300 ms 0.637 - eto shina, a 0.949 - otpravka i zabor".
+Eti dva chlena NE parallelny: 0.949 vkljuchaet v sebja 0.637, i ih summa 1.586 bolshe samogo
+celogo - arifmeticheski nevozmozhno, i eto vidno bylo srazu. Vernoe razlozhenie:
+
+    chtenie read_plain (mmap -> zakreplennaja pamjat)  0.10 ms   2.51 MB / 24.8 GB/s
+    PCIe                                              0.64      2.51 MB / 3.94 GB/s
+    submit + zabor                                    0.10      izmereno raznostju: shest
+                                                                podkachek pod odnim zaborom
+                                                                dali 1.300 -> 1.196
+    NEIZVESTNO                                        0.46      edinstvennyj nezamerennyj chlen
+                                                      ----
+                                                      1.30      izmereno na generacii
+
+Chto eto menjaet kachestvenno. Ja zakryl formu iz statji (podkachka na kazhdom sloe) kak
+zavedomo ubytochnuju - x2.00 po vremeni tokena. Eto verno TOLKO pri polnoj cene 1.300. Pol ceny
+lezhit mezhdu 0.10 i 0.56 ms, i vilka celikom v tom, komu prinadlezhat neizvestnye 0.46. Znachit
+okupaemost podkachki ot 1.0 do 5.9 obrashchenij, a ne 3.5 - i pri 1.0 dazhe potokjennaja podkachka
+okupaetsja, to est tochnost predskazatelja stanovitsja obnalichivaemoj.
+
+**Ostatok 0.46 ms - samyj cennyj neizmerennyj chlen proekta.** On odin reshaet, byla li forma iz
+statji zakryta pravilno.
