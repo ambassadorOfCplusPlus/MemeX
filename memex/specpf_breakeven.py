@@ -17,21 +17,23 @@ N_LAYER, N_USED, N_EXPERT = 48, 8, 128
 HOST_BW = 24.8e9                   # METHODS: 24.8 GB/s v vosem potokov, izmereno
 TOKEN_MS = 61.2                    # zamorozhennoe plecho: 16.347 tok/s
 
-# Razlozhenie odnoj podkachki. STATE "Baza byla nevernoj na 46%": izmereno 1,30 ms (ne 1,89 -
-# staryj znamenatel delil total S pervichnoj zalivkoj na rate BEZ nejo), iz nih objasneno 0,74.
-PROMO_MS        = 1.30             # izmereno na generacii
-PROMO_READ_MS   = 0.10             # read_plain: mmap -> zakreplennaja pamjat, 2.51 MB / 24.8 GB/s
-PROMO_PCIE_MS   = 0.64             # 2.51 MB / 3.94 GB/s, ochered DMA
-PROMO_FENCE_MS  = 0.10             # submit + zabor, IZMERENO raznostju: shest podkachek pod odnim
-                                   # zaborom dali 1,300 -> 1,196 na podkachku
-PROMO_UNKNOWN_MS = PROMO_MS - PROMO_READ_MS - PROMO_PCIE_MS - PROMO_FENCE_MS   # 0,46 ms
+# Razlozhenie odnoj podkachki. NE pricenennoe, a IZMERENNOE samim dvizhkom: stroka "iz chego
+# sostoit podkachka" v _psab_*.out, vosem progonov, razbros po submit+zaboru 2,4%.
+# Prezhde chem sobirat eti chisla ja sobralsja stroit zond - oni uzhe lezhali v results/
+# s proshlogo svipa perioda (METHODS 76, tretij raz za proekt).
+PROMO_MS        = 1.306            # izmereno, srednee po vosmi progonam
+PROMO_READ_MS   = 0.341            # memcpy iz otobrazhenija v zakreplennuju pamjat, IZMERENO
+PROMO_REC_MS    = 0.009            # zapis kopii
+PROMO_FENCE_MS  = 0.949            # submit + zabor, IZMERENO. PCIe sidit VNUTRI etogo ozhidanija
+PROMO_REST_MS   = 0.007            # ostatka net: neizvestnogo chlena bolshe ne sushchestvuet
+READ_GBS        = 7.37             # 2,51 MB v odin potok - a ne 24,8 GB/s vosmipotochnogo streama
 
-# Etot ostatok - edinstvennyj neizmerennyj chlen, i ot togo, chej on, zavisit vsjo. Esli on na
-# hostovoj shine (v stroke pro PCIe stoit "tri zapisannye kopii"), on ne skryvaetsja nikogda i
-# vhodit v pol. Esli on na potoke ili na ustrojstve - skryvaetsja. STATE nazyvaet sledujushchim
-# instrumentom "zamerit read_plain otdelno" imenno poetomu.
-FLOOR_LO = PROMO_READ_MS                          # ostatok skryvaem
-FLOOR_HI = PROMO_READ_MS + PROMO_UNKNOWN_MS       # ostatok na hostovoj shine
+# Chto skryvaemo, a chto net. Chtenie idjot po TOJ ZHE hostovoj shine, chto i schjot processora,
+# i ne skryvaetsja nikogda. Submit s zaborom - hostovaja koordinacija na tom zhe potoke, kotorogo
+# CPU zhdjot na dzhojne; on ustranim, no tolko toj rabotoj, kotoroj net: otdelnyj zabor, peredacha
+# vladenija ocheredi i asinhronnaja DMA. Poka batch_end sinhronno zhdjot zabor - eto pol.
+FLOOR_LO = PROMO_READ_MS + PROMO_REC_MS + PROMO_REST_MS    # esli submit+zabor ubrat polnostju
+FLOOR_HI = PROMO_MS                                        # kak segodnja
 
 expert_uses = N_LAYER * N_USED
 expert_mb = EXPERT_BYTES_PER_TOKEN / expert_uses
@@ -42,25 +44,22 @@ print("za tokjen CPU tratil by %.1f ms na vseh %d ekspertov (STATE: ~36 ms pri n
       % (cpu_ms_per_use * expert_uses, expert_uses))
 
 print("\nskolko RAZ ekspert dolzhen byt vostrebovan posle prodvizhenija, chtoby ono okupilos:")
-for name, cost in (("polnaja izmerennaja cena, kak segodnja", PROMO_MS),
-                   ("pol, esli ostatok 0.46 na hostovoj shine", FLOOR_HI),
-                   ("pol, esli ostatok skryvaem (tolko read_plain)", FLOOR_LO)):
+for name, cost in (("kak segodnja (1.306 ms)", PROMO_MS),
+                   ("esli submit+zabor ubran celikom (0.357 ms)", FLOOR_LO)):
     print("   %-46s %5.1f obrashchenij" % (name, cost / cpu_ms_per_use))
 
 print("\nskolko TOKENOV rezidentnosti eto znachit pri emkosti C na sloj")
 print("   (rezidentnyj ekspert vostrebuetsja %d*popadanij/C raz za tokjen)" % N_USED)
-print("   %4s %8s %10s %10s %10s" % ("C", "popadanij", "1.30 ms", "0.56 ms", "0.10 ms"))
+print("   %4s %8s %10s %10s %10s" % ("C", "popadanij", "1.306 ms", "0.357 ms"))
 for C, hit in ((12, 0.62), (16, 0.70), (24, 0.80)):
     uses_per_token = N_USED * hit / C
-    row = [cost / cpu_ms_per_use / uses_per_token
-           for cost in (PROMO_MS, FLOOR_HI, FLOOR_LO)]
-    print("   %4d %8.0f%% %10.0f %10.0f %10.0f" % (C, 100 * hit, *row))
+    row = [cost / cpu_ms_per_use / uses_per_token for cost in (PROMO_MS, FLOOR_LO)]
+    print("   %4d %8.0f%% %10.0f %10.0f" % (C, 100 * hit, *row))
 
 print("\nA teper naoborot: chto stoit odna podkachka na sloj na tokjen (forma SpecPrefetch)")
 per_tok = (N_LAYER - 1)
-for name, cost in (("polnaja izmerennaja", PROMO_MS),
-                   ("pol, ostatok na shine", FLOOR_HI),
-                   ("pol, ostatok skryvaem", FLOOR_LO)):
+for name, cost in (("kak segodnja", PROMO_MS),
+                   ("pol: submit+zabor ubran", FLOOR_LO)):
     ms = per_tok * cost
     print("   %-22s %d podkachek x %.3f ms = %6.1f ms na tokjen pri tokene v %.1f ms  (x%.2f)"
           % (name, per_tok, cost, ms, TOKEN_MS, (TOKEN_MS + ms) / TOKEN_MS))
