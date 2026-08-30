@@ -109,4 +109,5 @@ def main():
             sc.append(np.hstack([xte, np.ones((xte.shape[0], 1), np.float32)]) @ Ws)
         report("OBSHCHIJ linejnyj (test)", sc, idsl)
 
-main()
+if __name__ == "__main__":
+    main()
