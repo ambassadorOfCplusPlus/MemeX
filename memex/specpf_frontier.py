@@ -142,12 +142,13 @@ def main():
         fam["predema%d" % int(d * 100)] = out
     nrm = lambda A: A / np.maximum(A.max(axis=2, keepdims=True), 1e-9)
     fam["mix"] = nrm(fam["rec90"]) + nrm(fam["predema90"])
-    for P in (4, 16, 32, 64):
+    ORP = (1, 4, 16, 32, 64, 128, 256)
+    for P in ORP:
         fam["orakul%d" % P] = np.stack([fut_counts(ids[j], T, E, P) for j in range(nL)])
 
     freq_fams = ["lfu32", "lfu64", "lfu128", "rec90", "rec97"]
     pred_fams = ["pred", "predema70", "predema90", "predema97", "mix"]
-    periods = [1, 2, 4, 8, 16, 32, 64, 128, 1000]
+    periods = [1, 2, 4, 8, 16, 32, 64, 128, 256, 1000]
 
     for C in a.caps:
         print("\n=== C = %d na sloj; podkachki - summa po %d slojam za tokjen ===" % (C, nL))
@@ -161,7 +162,7 @@ def main():
                     h, pr = simulate(fam[name], ids, C, P, kcap, T0, T1)
                     pts[name].append((pr, h, P, kcap))
         pts["orakul"] = []
-        for P in (4, 16, 32, 64):
+        for P in ORP:
             h, pr = simulate(fam["orakul%d" % P], ids, C, P, None, T0, T1)
             pts["orakul"].append((pr, h, P, None))
 
