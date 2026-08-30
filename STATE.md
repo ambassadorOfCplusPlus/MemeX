@@ -2072,3 +2072,88 @@ prosto reshaet ne tu zadachu, kotoraja u nas est.
 Eto znachit, chto predskazatel mog by okupitsja tolko tam, gde podkachka deshevaja - to est POSLE
 asinhronnoj peredachi, kogda cena padaet s 13.6 do 3.7 obrashchenij. Do togo merit ego snova
 nezachem.
+
+## Uchenyj predskazatel rezidentnogo nabora: tochen, i pri ravnyh podkachkah ne bjot LFU
+
+SpecPrefetch (arXiv 2607.24787) na nashej modeli, na nashih trassah. Vsjo poschitano na odnoj
+trasse v odnom progone - LFU, nedavnost i orakul rjadom s predskazatelem, potomu chto chisla iz
+raznyh trass zdes ne sravnimy.
+
+**Signal est i on krupnyj.** Poslojnoe linejnoe otobrazhenie iz vhoda marshrutizatora sloja L v
+ekspertov sloja L+1 (ridge, to est predel po rangu i verhnjaja granica ljubogo rank-r adaptera):
+R@8 62,1%, **R@16 80,2%**, R@24 87,3% na otlozhennyh tokenah, protiv chastotnyh 29,2 / 45,9 / 57,8.
+Staryj otricatelnyj zamer ("sloj L ne predskazyvaet L+1", 6,0% protiv pola 6,25%) etomu ne
+protivorechit: on meril ID protiv ID, a ne skrytoe sostojanie.
+
+**Forma iz statji u nas ne rabotaet.** Statja delit OBA A i B mezhdu slojami; u nas obshchie A i B
+dajut R@16 = **37,5%**, to est NIZHE chastotnoj bazovoj linii. Obshchij A r=128 s poslojnym B dajot
+77,3%. Golova objazana byt poslojnoj - eto tot zhe nash rezultat, chto indeks eksperta znachit
+raznoe v kazhdom sloe.
+
+**Zapas po vremeni ne uzkoe mesto:** R@16 = 80,2 / 79,5 / 78,1 / 76,1 pri zapase 1 / 2 / 4 / 8
+sloev. Vosem sloev - eto ~10 ms, semikratnyj zapas nad cenoj peredachi.
+
+**I vsjo eto ne obnalichivaetsja.** Frontier pri RAVNYH podkachkah na tokjen, C=16:
+
+    podkachek/tok   chastota   luchshij predskazatel   raznica
+        0,00        42,02%          43,07%            +1,04
+        0,74        43,86           43,92             +0,06
+        1,47        44,26           44,64             +0,38
+        2,89        45,55           45,25             -0,28
+        5,79        47,57           46,83             -0,66
+       11,51        50,15           49,61             -0,52
+
+Maksimum **+1,04 punkta**, i tot v tochke nulevyh podkachek; po kursu eto +0,10 tok/s = **+0,6%**
+pri pole shuma 4,2%. Porog, zapisannyj do zamera, byl +4 punkta. V dvizhok ne vodim.
+
+Chetyre gorizontnyh semejstva (obuchennye na spros za sledujushchie K tokenov imenno radi
+medlennosti) idut po nulju ili v minus. Ih vidimoe preimushchestvo (+8,3 punkta) bylo protiv
+STATICHESKOJ chastotnoj tablicy; onlajnovoe chastotnoe okno vidit nastojashchie vybory, a
+predskazatel ih tolko vyvodit. I eti +8,3 trebujut perevybora kazhdyj tokjen: 43,4 podkachki na
+tokjen.
+
+### Kurs obmena, i pochemu "tridcat punktov" - ne to chislo
+
+Odin punkt popadanij = 3,84 obrashchenija x 0,0957 ms = **0,368 ms na tokjen**. Znachit odna
+podkachka na tokjen stoit **3,55 punkta popadanij segodnja** i 0,97 na polu. Proverka protiv
+zamera, sdelannogo ranshe modeli: period3 protiv frozen predskazan v 14,50 tok/s protiv
+izmerennyh 14,14 - 2,5% pri pole 4,2%.
+
+Orakul pri TEH ZHE podkachkah, a ne bespriceljnyj:
+
+    podkachek/tok   orakul   chastota   razryv         cena
+        2,55        54,11%    45,01%     9,10 punkta   +0,96 tok/s (+5,8%)
+        5,78        58,66     47,50     11,16          +1,19       (+7,2%)
+       11,89        64,08     50,31     13,77          +1,50       (+9,1%)
+
+85,7% orakula merilis pri neogranichennyh podkachkah. Pri bjudzhete, kotoryj mashina platit,
+razryv **9-11 punktov**, a ne 30. Razryv nastojashchij - no orakulu pomogaet znanie BUDUSHCHEGO,
+a sloj skrytogo sostojanija dajot znanie NASTOJASHCHEGO, i imenno poetomu predskazatel berjot iz
+nego okolo odnogo punkta.
+
+### Cena podkachki razlozhena polnostju, i neizvestnogo chlena net
+
+Dvizhok pechatal eto sam v vosmi progonah `_psab_*.out`, i nikto ne chital:
+
+    chtenie (memcpy otobrazhenie -> zakreplennaja, 7,37 GB/s odnopotochno)  0,341 ms  (12,9%)
+    zapis kopii                                                            0,009
+    submit + zabor (PCIe vnutri ozhidanija)                                0,949     (2,4%)
+    ostatok                                                                0,007
+                                                                           1,306 ms  (4,7%)
+
+Prezhnjaja zapis v STATE ("submit s zaborom stoil 0,10 ms") byla nevernoj: 0,10 - eto skolko ubralo
+paketirovanie, a ne skolko stoit termin. Ne ubralos ostalnoe potomu, chto cena v OZHIDANII zabora,
+a ne v ih chisle. I chtenie ne 0,10 a 0,341, potomu chto 0,10 schitalos po 24,8 GB/s
+vosmipotochnogo streama, a odnopotochnyj memcpy na 2,51 MB dajot 7,37.
+
+**Sledujushchij rychag - eti 0,949 ms, a ne politika.** Ubrat ih - eto 3,55 -> 0,97 punkta za
+podkachku, vtroe deshevle churn, i eto edinstvennoe, chto delaet 9-11 punktov razryva orakula
+dostizhimymi hot kakoj-nibud politikoj. Forma SpecPrefetch mertva v ljubom sluchae: 47 podkachek
+na tokjen - eto 61,4 ms segodnja i 16,8 ms dazhe na polu, pri tokene v 61,2 ms.
+
+### Zaodno: tretij raund svipa perioda uzhe byl sobran
+
+Iz teh zhe `_psab_*.out`: **frozen 16,41/16,49 (razbros 0,5%) protiv period3 14,10/14,19 (0,6%)**,
+oba plecha chistye, raznica **+16,3%**. Umolchanie `--resident-period 3` podtverzhdeno kak hudshee
+na dvuh tugih replikah. Periody 16/32/64 po-prezhnemu ne rezultat (razbrosy 12,6% i 5,8%; u 64
+odna replika).

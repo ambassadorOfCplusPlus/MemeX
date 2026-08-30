@@ -1431,3 +1431,45 @@ NaN на AVX2 медленнее нормальных чисел. **Плечо �
 Мерить так всегда: не «какова точность», а «какова точность как функция запаса», потому что кривая
 может оказаться плоской (наш случай — тогда запас бесплатен) или обрывистой (тогда точность на
 нулевом запасе ничего не значит).
+
+## 80. «Ubrali X — stalo bystree na D» merit predelnyj vklad X, a ne cenu X
+
+V STATE stojala stroka: «paketirovanie nashlo iz nih rovno 0,10: 1,300 -> 1,196 ms na podkachku
+pri shesti podkachkah pod odnim zaborom. **Submit s zaborom stoil 0,10 ms na podkachku.**»
+
+Pervoe predlozhenie — zamer, i ono verno. Vtoroe — vyvod, i on nevernyj. Nastojashchaja cena
+submita s zaborom **0,949 ms** (vosem progonov, razbros 2,4 %). Paketirovanie ne ubralo ostalnoe
+potomu, chto cena sidit v **ozhidanii** zabora, a ne v ih chisle: `batch_end` zhdjot sinhronno, i
+shest podkachek pod odnim zaborom zhdut rovno stolko zhe, skolko shest pod shestju.
+
+Obshchij vid: raznost dvuh rezhimov dajot **predelnyj vklad v toj tochke, gde izmerjali**. S polnoj
+stoimostju on sovpadaet, tolko esli zavisimost linejna i prohodit cherez nol. Zdes ona ne
+prohodit — ubrat pjat zaborov iz shesti ne ubiraet pjat shestyh ozhidanija.
+
+Cena etoj oshibki: na nej byl postroen «neizvestnyj chlen 0,46 ms», a na njom — vilka v faktor
+shest po tomu, skolko podkachek mashina mozhet sebe pozvolit. Neizvestnogo chlena ne sushchestvuet
+(ostatok 0,007 ms); vsja vilka byla artefaktom.
+
+**Praktichesky: pomechat kazhduju stroku vida «X stoit N» tem, kak ona poluchena — zamerom naprjamuju
+ili raznostju dvuh rezhimov.** Vtoroe pri sledujushchem chtenii chitaetsja kak pervoe, i imenno tak
+i proizoshlo — dvazhdy, potomu chto ja povtoril tot zhe vyvod, prochitav ego v STATE.
+
+Ryadom — chetvjortyj sluchaj METHODS 76 za proekt: cena byla vsjo eto vremja napechatana dvizhkom v
+stroke «iz chego sostoit podkachka» v vosmi fajlah `_psab_*.out`. Ja sobiralsja stroit zond dlja
+toj zhe velichiny. Poisk stroki v `results/` zanjal odnu komandu.
+
+## 81. Verhnjaja granica, poschitannaja bez ceny, nazyvaet ne tot razmer prizov
+
+«Orakul 85,7 % protiv LFU 52,8 % — tridcat punktov ne tronuty» prostojalo kak glavnyj argument za
+celoe napravlenie. Orakul tam merilsja pri **neogranichennom chisle podkachek**: chtoby ego
+dostich, nabor perevybiraetsja tak chasto, kak zahochetsja.
+
+Kogda obe politiki postavleny na odnu os «popadanija protiv podkachek na tokjen», razryv
+sokrashchaetsja do **9–11 punktov** v tom diapazone, kotoryj mashina real'no platit (1–6 podkachek
+na tokjen), i do 13,8 pri 11,9 podkachkah. Prizo est, no on vtroe menshe objavlennogo, i eto
+menjaet, skolko raboty on opravdyvaet.
+
+Pravilo: **verhnjaja granica objazana byt poschitana pri tom zhe ogranichenii, chto i kandidat.**
+Orakul, kotoromu razresheno bolshe, chem kandidatu, izmerjaet summu dvuh raznyh preimushchestv —
+znanie i svobodu — i pripisyvaet obe znaniju. Zdes eto proyavilos v chistom vide: pri ravnyh
+podkachkah uchenyj predskazatel s R@16 = 80,2 % berjot iz razryva **odin punkt**.
