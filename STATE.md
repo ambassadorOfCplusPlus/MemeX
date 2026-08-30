@@ -1974,3 +1974,30 @@ loses 2,1 points of plateau against period 3 but its dip after a domain switch i
 (5,5% against 28,1%). A frequently-refreshed set is more tightly fitted to the current domain and
 therefore more brittle; recovery takes 76 tokens regardless of period, so recovery is bounded by the
 observation window rather than by the refresh rate.
+
+## Gorizont predskazanija po TOKENAM: izmeren, kontrol peremeshivaniem projden
+
+Trassa koda, 2914 tokenov, 2039 na obuchenie / 811 na proverku. Metrika ta zhe, chto merit politika:
+dolja ekspertov, dejstvitelno vybrannyh na tokene, popavshih v top-C ocenki.
+
+    gorizont    C=16    peremeshan    chastota    raznica
+           1  80.22%        32.68%      42.43%     +37.79
+           8  59.78%        37.28%      42.43%     +17.35
+          16  54.54%        37.44%      42.43%     +12.11
+
+**Signal zatuhaet, no vyzhivaet.** Vosem tokenov vperjod - eto 490 ms uprezhdenija pri cene
+podkachki v 1.300 ms, i tam vsjo eshchjo +17.35 punkta nad chastotoj. Porog otkaza byl +4.
+
+**Kontrol reshajushchij i on projden.** Peremeshannye skrytye sostojanija dajut 37.28% protiv
+59.78% u nastojashchih. Bolshe togo, peremeshannyj vhod **huzhe trivialnoj chastoty** (37.28 protiv
+42.43): model ne prosto vyuchila chastotnyj prior, ona chitaet soderzhanie, i slomannyj vhod
+uvodit ejo nizhe, chem otsutstvie modeli voobshche.
+
+Chego eto NE govorit: sravnenija pri RAVNOM chisle podkachek zdes net, a imenno ono reshaet, stoit
+li rabota v dvizhke. Kurs izmeren i zhestok - 2.25 punkta popadanij, kuplennye tekuchkoj, stoili
+1.55 tok/s.
+
+Vtoroe utochnenie, k moej sobstvennoj formulirovke: uprezhdenie snimaet SROCHNOST, a ne CENU. Iz
+1.300 ms na podkachku 0.637 - eto shina, a 0.949 - otpravka i ozhidanie otmetki, to est rabota na
+potoke, kotoraja tratitsja nezavisimo ot togo, zhdjot li ejo kto-nibud. Kolonka "3.5 obrashchenija"
+dostizhima tolko posle asinhronnoj peredachi na ocheredi DMA so svoej otmetkoj - a ejo net.
