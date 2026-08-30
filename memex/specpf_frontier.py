@@ -21,6 +21,7 @@ import argparse
 import numpy as np
 from specpf_data import load
 from specpf_feas import multihot, ridge
+from specpf_horizon import horizon_scores
 
 
 def win_counts(ids, T, E, W):
@@ -117,7 +118,9 @@ def main():
     a = ap.parse_args()
 
     E = a.n_expert
+    layers_arr, X, I = load(a.npz)
     layers, T, ntr, tgt, ids, Zs = build(a.npz, a.lam, a.train_frac, E)
+    layers = layers_arr
     nL = len(tgt)
     T0, T1 = ntr + a.gap, T
     print("tokenov %d; obuchenie 0..%d, ocenka %d..%d (%d tokenov), sloev %d"
@@ -140,6 +143,17 @@ def main():
             acc = acc * d + sm[:, t]
             out[:, t] = acc
         fam["predema%d" % int(d * 100)] = out
+    # The horizon families: the same fit, but the label is the demand over the NEXT K tokens
+    # rather than the next layer. A K=1 score is the jumpiest thing a predictor can produce and
+    # was the only predictor arm in the first version of this sweep - which is why the predictor
+    # looked useless at long refresh periods. A K=32 score is slow by construction, so it should
+    # cost few promotions AND be input-driven; the shuffle control says it is not a frequency
+    # table (12 points of gap at K=32).
+    rng = np.random.default_rng(1)
+    for K in (8, 16, 32, 64):
+        Sh, Shuf, _ = horizon_scores(X, I, layers, K, ntr, E, a.lam, rng)
+        fam["hor%d" % K] = Sh
+        fam["hor%d_shuf" % K] = Shuf
     nrm = lambda A: A / np.maximum(A.max(axis=2, keepdims=True), 1e-9)
     fam["mix"] = nrm(fam["rec90"]) + nrm(fam["predema90"])
     ORP = (1, 4, 16, 32, 64, 128, 256)
@@ -147,7 +161,8 @@ def main():
         fam["orakul%d" % P] = np.stack([fut_counts(ids[j], T, E, P) for j in range(nL)])
 
     freq_fams = ["lfu32", "lfu64", "lfu128", "rec90", "rec97"]
-    pred_fams = ["pred", "predema70", "predema90", "predema97", "mix"]
+    pred_fams = ["pred", "predema90", "predema97", "mix",
+                 "hor8", "hor16", "hor32", "hor64", "hor32_shuf"]
     periods = [1, 2, 4, 8, 16, 32, 64, 128, 256, 1000]
 
     for C in a.caps:

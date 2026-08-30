@@ -63,3 +63,29 @@ for name, cost in (("kak segodnja", PROMO_MS),
     ms = per_tok * cost
     print("   %-22s %d podkachek x %.3f ms = %6.1f ms na tokjen pri tokene v %.1f ms  (x%.2f)"
           % (name, per_tok, cost, ms, TOKEN_MS, (TOKEN_MS + ms) / TOKEN_MS))
+
+# ---------------------------------------------------------------------------------------------
+# THE EXCHANGE RATE, and a check of this whole file against a measurement made before it.
+#
+# Reading a hit-rate-against-promotions frontier needs one number: how many points of hit rate one
+# extra promotion per token is worth. Both sides are now measured, so it is a division, not a view.
+HIT_POINT_MS = N_LAYER * N_USED / 100.0 * cpu_ms_per_use     # one point of hit rate, in ms/token
+print("\nodin punkt popadanij = %.3f ms na tokjen (%.1f obrashchenij x %.4f ms)"
+      % (HIT_POINT_MS, N_LAYER * N_USED / 100.0, cpu_ms_per_use))
+for name, cost in (("segodnja", PROMO_MS), ("na polu", FLOOR_LO)):
+    print("   odna podkachka na tokjen %-9s stoit %.3f ms = %.2f punkta popadanij"
+          % (name, cost, cost / HIT_POINT_MS))
+
+# The check. The period sweep measured two CLEAN arms - frozen 16.41/16.49 (razbros 0.5%) and
+# period 3 at 14.10/14.19 (0.6%), both at C=12 - differing by 6.91 promotions per token. If the
+# arithmetic above is right it must reproduce that difference without being fitted to it.
+FROZEN_TPS, PERIOD3_TPS, PERIOD3_PROMO = 16.45, 14.145, 6.91
+FROZEN_HIT, PERIOD3_HIT = 69.3, 71.6                          # STATE, same sweep
+tok_ms = 1000.0 / FROZEN_TPS
+pred_ms = PERIOD3_PROMO * PROMO_MS - (PERIOD3_HIT - FROZEN_HIT) * HIT_POINT_MS
+pred_tps = 1000.0 / (tok_ms + pred_ms)
+print("\nproverka arifmetiki protiv zamera, kotoryj sdelan RANSHE nejo:")
+print("   period3 protiv frozen: %.2f podkachki x %.3f ms - %.1f punkta x %.3f ms = %+.2f ms"
+      % (PERIOD3_PROMO, PROMO_MS, PERIOD3_HIT - FROZEN_HIT, HIT_POINT_MS, pred_ms))
+print("   predskazano %.2f tok/s, izmereno %.2f, rashozhdenie %.1f%% pri pole shuma 4.2%%"
+      % (pred_tps, PERIOD3_TPS, 100 * abs(pred_tps - PERIOD3_TPS) / PERIOD3_TPS))
