@@ -1997,24 +1997,40 @@ Chego eto NE govorit: sravnenija pri RAVNOM chisle podkachek zdes net, a imenno 
 li rabota v dvizhke. Kurs izmeren i zhestok - 2.25 punkta popadanij, kuplennye tekuchkoj, stoili
 1.55 tok/s.
 
-ISPRAVLENIE, i ono moe. Ja napisal "iz 1.300 ms 0.637 - eto shina, a 0.949 - otpravka i zabor".
-Eti dva chlena NE parallelny: 0.949 vkljuchaet v sebja 0.637, i ih summa 1.586 bolshe samogo
-celogo - arifmeticheski nevozmozhno, i eto vidno bylo srazu. Vernoe razlozhenie:
+ISPRAVLENIE ISPRAVLENIJA. Zdes stojala tablica, gde submit+zabor stoit 0.10 ms, a 0.46 ms
+nikomu ne prinadlezhit. Ona nevernaja, i ja prinjal ejo na veru, hotja pravilnoe chislo bylo u
+menja RANSHE i ja sam ego nazval.
 
-    chtenie read_plain (mmap -> zakreplennaja pamjat)  0.10 ms   2.51 MB / 24.8 GB/s
-    PCIe                                              0.64      2.51 MB / 3.94 GB/s
-    submit + zabor                                    0.10      izmereno raznostju: shest
-                                                                podkachek pod odnim zaborom
-                                                                dali 1.300 -> 1.196
-    NEIZVESTNO                                        0.46      edinstvennyj nezamerennyj chlen
-                                                      ----
-                                                      1.30      izmereno na generacii
+Otkuda vzjalas oshibka: STATE soderzhit vyvod "paketirovanie ubralo 0.10 ms, znachit submit+zabor
+stoit 0.10". Eto podmena velichiny. 0.10 - eto to, chto paketirovanie UBRALO, a ne to, chto chlen
+STOIT. Ostalnoe ne ubralos potomu, chto cena sidit v SINHRONNOM OZHIDANII zabora, a ne v ih
+kolichestve.
 
-Chto eto menjaet kachestvenno. Ja zakryl formu iz statji (podkachka na kazhdom sloe) kak
-zavedomo ubytochnuju - x2.00 po vremeni tokena. Eto verno TOLKO pri polnoj cene 1.300. Pol ceny
-lezhit mezhdu 0.10 i 0.56 ms, i vilka celikom v tom, komu prinadlezhat neizvestnye 0.46. Znachit
-okupaemost podkachki ot 1.0 do 5.9 obrashchenij, a ne 3.5 - i pri 1.0 dazhe potokjennaja podkachka
-okupaetsja, to est tochnost predskazatelja stanovitsja obnalichivaemoj.
+Nastojashchee razlozhenie dvizhok pechatal vsjo eto vremja - vosem progonov `_psab_*.out` iz svipa
+perioda:
 
-**Ostatok 0.46 ms - samyj cennyj neizmerennyj chlen proekta.** On odin reshaet, byla li forma iz
+    chtenie (memcpy mmap -> zakreplennaja, 7.37 GB/s)   0.341 ms   razbros 12.9%
+    kopija zapisi                                       0.009
+    submit + zabor                                      0.949      razbros  2.4%
+    ostatok                                             0.007
+                                                        -----
+                                                        1.306      razbros  4.7%
+
+Neprinadlezhashchih 0.46 ms NET, i vilki v shest raz ne bylo. Chtenie 0.341, a ne 0.10, potomu chto
+0.10 schitalos po vosmipotochnoj polose 24.8 GB/s, a odnopotochnaja kopija 2.51 MB idjot na
+7.37 GB/s.
+
+**Chto iz etogo sleduet, i eto glavnoe.** 0.949 iz 1.306 - eto ozhidanie zabora na potoke. Uprezhdenie
+ego ne ubiraet: skolko by tokenov vperjod my ni znali, potok stoit v ozhidanii. Ubiraet ego tolko
+asinhronnaja peredacha na ocheredi DMA so svoim zaborom i peredachej vladenija - to samoe, chto
+vladelec predlagal s samogo nachala i chego v dvizhke net. Cena voprosa - 0.949 ms na podkachku,
+to est 73% ejo stoimosti.
+
+Pol ceny podkachki: 0.357 ms, okupaemost 3.7 obrashchenija protiv 13.6 segodnja.
+
+Uroki, oba dorogie:
+1. **Ja zamenil svojo vernoe chislo chuzhim nevernym, potomu chto ono prishlo s tablicej.** Forma
+   ubeditelnee soderzhanija, kogda proverjat lenivo.
+2. **Dvizhok pechatal otvet v vosmi fajlah, kotorye lezhali na diske.** Eto pjatyj sluchaj za proekt,
+   kogda iskomoe uzhe bylo sobrano. METHODS 76 napisano rovno pro eto.
 statji zakryta pravilno.
