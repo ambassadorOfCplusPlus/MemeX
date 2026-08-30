@@ -50,7 +50,7 @@ for name, cost in (("kak segodnja (1.306 ms)", PROMO_MS),
 
 print("\nskolko TOKENOV rezidentnosti eto znachit pri emkosti C na sloj")
 print("   (rezidentnyj ekspert vostrebuetsja %d*popadanij/C raz za tokjen)" % N_USED)
-print("   %4s %8s %10s %10s %10s" % ("C", "popadanij", "1.306 ms", "0.357 ms"))
+print("   %4s %8s %10s %10s" % ("C", "popadanij", "1.306 ms", "0.357 ms"))
 for C, hit in ((12, 0.62), (16, 0.70), (24, 0.80)):
     uses_per_token = N_USED * hit / C
     row = [cost / cpu_ms_per_use / uses_per_token for cost in (PROMO_MS, FLOOR_LO)]
