@@ -126,60 +126,66 @@ def main():
     print("tokenov %d; obuchenie 0..%d, ocenka %d..%d (%d tokenov), sloev %d"
           % (T, ntr, T0, T1, T1 - T0, nL))
 
-    sm = np.exp(Zs - Zs.max(axis=2, keepdims=True))
-    sm /= sm.sum(axis=2, keepdims=True)
+    # Thirty [46, 811+, 128] float32 score matrices at once is a couple of gigabytes and the
+    # first attempt at this sweep was killed without even a traceback. Families are therefore
+    # BUILT ON DEMAND and dropped after use: one lives at a time, and the sweep is the same.
+    def make(name):
+        if name.startswith("lfu"):
+            W = int(name[3:])
+            return np.stack([win_counts(ids[j], T, E, W) for j in range(nL)])
+        if name.startswith("rec"):
+            return np.stack([rec_counts(ids[j], T, E, int(name[3:]) / 100.0) for j in range(nL)])
+        if name == "pred":
+            return Zs
+        if name.startswith("predema"):
+            d = int(name[7:]) / 100.0
+            sm = np.exp(Zs - Zs.max(axis=2, keepdims=True))
+            sm /= sm.sum(axis=2, keepdims=True)
+            acc = np.zeros((nL, E), np.float32)
+            out = np.empty_like(sm)
+            for t in range(T):
+                acc = acc * d + sm[:, t]
+                out[:, t] = acc
+            return out
+        if name.startswith("orakul"):
+            K = int(name[6:])
+            return np.stack([fut_counts(ids[j], T, E, K) for j in range(nL)])
+        if name.startswith("hor"):
+            # The horizon families: same fit, but the label is demand over the NEXT K tokens
+            # rather than the next layer. K=1 is the jumpiest score a predictor can produce and
+            # was the ONLY predictor arm in the first version of this sweep - which is why the
+            # predictor looked useless at long refresh periods. A K=32 score is slow by
+            # construction, so it should cost few promotions while still being input-driven
+            # (the shuffle control gives 12 points of gap at K=32, so it is not a frequency table).
+            K = int(name[3:].replace("_shuf", ""))
+            S, Sh, _ = horizon_scores(X, I, layers, K, ntr, E, a.lam, np.random.default_rng(1))
+            return Sh if name.endswith("_shuf") else S
+        raise KeyError(name)
 
-    fam = {}
-    fam["lfu32"] = np.stack([win_counts(ids[j], T, E, 32) for j in range(nL)])
-    fam["lfu64"] = np.stack([win_counts(ids[j], T, E, 64) for j in range(nL)])
-    fam["lfu128"] = np.stack([win_counts(ids[j], T, E, 128) for j in range(nL)])
-    fam["rec90"] = np.stack([rec_counts(ids[j], T, E, 0.90) for j in range(nL)])
-    fam["rec97"] = np.stack([rec_counts(ids[j], T, E, 0.97) for j in range(nL)])
-    fam["pred"] = Zs
-    for d in (0.7, 0.9, 0.97):
-        acc = np.zeros((nL, E), np.float32)
-        out = np.zeros_like(sm)
-        for t in range(T):
-            acc = acc * d + sm[:, t]
-            out[:, t] = acc
-        fam["predema%d" % int(d * 100)] = out
-    # The horizon families: the same fit, but the label is the demand over the NEXT K tokens
-    # rather than the next layer. A K=1 score is the jumpiest thing a predictor can produce and
-    # was the only predictor arm in the first version of this sweep - which is why the predictor
-    # looked useless at long refresh periods. A K=32 score is slow by construction, so it should
-    # cost few promotions AND be input-driven; the shuffle control says it is not a frequency
-    # table (12 points of gap at K=32).
-    rng = np.random.default_rng(1)
-    for K in (8, 16, 32, 64):
-        Sh, Shuf, _ = horizon_scores(X, I, layers, K, ntr, E, a.lam, rng)
-        fam["hor%d" % K] = Sh
-        fam["hor%d_shuf" % K] = Shuf
-    nrm = lambda A: A / np.maximum(A.max(axis=2, keepdims=True), 1e-9)
-    fam["mix"] = nrm(fam["rec90"]) + nrm(fam["predema90"])
-    ORP = (1, 4, 16, 32, 64, 128, 256)
-    for P in ORP:
-        fam["orakul%d" % P] = np.stack([fut_counts(ids[j], T, E, P) for j in range(nL)])
-
-    freq_fams = ["lfu32", "lfu64", "lfu128", "rec90", "rec97"]
-    pred_fams = ["pred", "predema90", "predema97", "mix",
-                 "hor8", "hor16", "hor32", "hor64", "hor32_shuf"]
-    periods = [1, 2, 4, 8, 16, 32, 64, 128, 256, 1000]
+    ORP = (1, 16, 32, 64, 128)
+    freq_fams = ["lfu32", "lfu64", "rec90", "rec97"]
+    pred_fams = ["pred", "predema97", "hor8", "hor16", "hor32", "hor64", "hor32_shuf"]
+    periods = [1, 4, 8, 16, 32, 64, 128, 1000]
 
     for C in a.caps:
         print("\n=== C = %d na sloj; podkachki - summa po %d slojam za tokjen ===" % (C, nL))
         pts = {}
         for name in freq_fams + pred_fams:
             pts[name] = []
+            M = make(name)
             for P in periods:
                 for kcap in (None, 1):
                     if P == 1000 and kcap is not None:
                         continue
-                    h, pr = simulate(fam[name], ids, C, P, kcap, T0, T1)
+                    h, pr = simulate(M, ids, C, P, kcap, T0, T1)
                     pts[name].append((pr, h, P, kcap))
+            del M
         pts["orakul"] = []
         for P in ORP:
-            h, pr = simulate(fam["orakul%d" % P], ids, C, P, None, T0, T1)
+            M = make("orakul%d" % P)
+            h, pr = simulate(M, ids, C, P, None, T0, T1)
             pts["orakul"].append((pr, h, P, None))
+            del M
 
         print("%14s %8s %5s %10s %14s" % ("semejstvo", "period", "cap", "popadanij", "podkachek/tok"))
         for name in freq_fams + pred_fams + ["orakul"]:

@@ -2034,3 +2034,41 @@ Uroki, oba dorogie:
 2. **Dvizhok pechatal otvet v vosmi fajlah, kotorye lezhali na diske.** Eto pjatyj sluchaj za proekt,
    kogda iskomoe uzhe bylo sobrano. METHODS 76 napisano rovno pro eto.
 statji zakryta pravilno.
+
+## Frontier pri RAVNYH podkachkah: predskazatel proigryvaet chastote. Napravlenie zakryto
+
+Sled koda, 2914 tokenov, obuchenie 0..2039, ocenka 2103..2914 (811 tokenov), 46 sloev, C=16.
+Sravnenie na odnoj i toj zhe trasse, v odnom progone, pri ravnom chisle podkachek na tokjen.
+
+**Iz 97 tochek 89 otricatelnyh i 8 polozhitelnyh.** Luchshaja - +1.85 punkta pri 46 podkachkah na
+tokjen, chto pri 1.306 ms kazhdaja stoit 60 ms pri tokene v 61.2, to est udvaivaet tokjen. V
+rabochej oblasti (1-9 podkachek) luchshee, chto est, - +0.60 punkta. Porog otkaza byl +4.
+
+    hor32 period 32    podkachek  1.43   predskazatel 44.10%   chastota 44.25%   -0.15
+    hor32 period 8     podkachek  5.51   predskazatel 45.57%   chastota 47.02%   -1.45
+    hor32 period 4     podkachek 10.91   predskazatel 46.41%   chastota 49.92%   -3.51
+    hor64 period 1     podkachek 41.87   predskazatel 47.77%   chastota 56.37%   -8.60
+
+Zamette: chem BOLSHE podkachek, tem huzhe predskazatel otnositelno chastoty. Eto ne shum, eto
+sistematika.
+
+### Pochemu tochnyj predskazatel daet hudshuju politiku
+
+Polnota otvechaet na vopros "budet li etot ekspert vostrebovan". Politika trebuet otveta na drugoj:
+"budet li on vostrebovan DOSTATOCHNO CHASTO, chtoby otbit 13.6 obrashchenij". Eto raznye voprosy, i
+chastotnaja tablica otvechaet na vtoroj naprjamuju - potomu chto chastota i est ozhidaemoe chislo
+obrashchenij.
+
+Predskazatel vybiraet togo, kto nuzhen SKORO. Rezidentnyj nabor dolzhen derzhat togo, kto nuzhen
+MNOGO RAZ. Pri cene podkachki v 13.6 obrashchenij "skoro" ne stoit nichego.
+
+### Chto pri etom NE oprovergnuto
+
+Signal nastojashchij i krupnyj: +37.79 punkta polnoty nad chastotoj pri gorizonte 1, i kontrol
+peremeshivaniem projden s zapasom (peremeshannyj vhod dajot 28.55% protiv 42.02% u chastoty - to
+est huzhe otsutstvija modeli, znachit model chitaet soderzhanie, a ne prior). Model rabotaet. Ona
+prosto reshaet ne tu zadachu, kotoraja u nas est.
+
+Eto znachit, chto predskazatel mog by okupitsja tolko tam, gde podkachka deshevaja - to est POSLE
+asinhronnoj peredachi, kogda cena padaet s 13.6 do 3.7 obrashchenij. Do togo merit ego snova
+nezachem.
