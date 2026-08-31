@@ -2587,3 +2587,33 @@ ischezla. No uskoreniem ne javljaetsja.
 **Ostajotsja odna krupnaja statja: 234 us postojannoj ceny x 49 peresechenij.** Vsjo ostalnoe v
 etoj chasti izmereno i malo. Urok metoda: prirashchenie sreza soderzhit i rabotu, i nakladnye -
 delit ego na chislo uzlov mozhno tolko posle vychitanija bajtov.
+
+## Ozhidanie otveta karty: pol 310 mks plus dobavka ot prostoja. Obe versii verny napolovinu
+
+Instrument: FENCE_SPLIT s korreljaciej ozhidanija protiv PROSTOJA pered otpravkoj, tolko
+generacija (vsjo, chto zhdjot bolshe 2 ms, otbrosheno - eto prefill).
+
+**Pervye dve popytki byli negodny i ja pochti sdelal iz nih vyvod.** Vedra byli grubye i prefill
+smeshan s generaciej: v odnoj vyborke bylo 46 i 281 vyzov protiv 2304 nastojashchih peresechenij, a
+poslednee vedro s 3669 prefill-vyzovami davalo srednee 5,3 ms. Vyvod "zavisimosti ot prostoja net"
+na etih chislah delat bylo nelzja.
+
+Chistyj zamer, rabochaja konfiguracija (statika + eksperty na karte):
+
+    prostoj pered otpravkoj   vyzovov   zhdjom
+    menshe 100 mks             1949     310,3 mks
+    do 300 mks                 2410     425,4
+    do 600 mks                  511     485,5
+
+**Est POL v 310 mks, kotoryj progrevom ne ubrat, i sverhu DOBAVKA 115-175 mks, zavisjashchaja ot
+togo, skolko karta prostojala.**
+
+Skhodimost: 310 pola + 190 bajtov + 40 uzlov = 540 protiv izmerennyh 557.
+
+    pol 310 mks x 49 peresechenij       = 15,2 ms/tokjen   tolko sokrashcheniem chisla peresechenij
+    dobavka ot prostoja, v srednem ~57  = 2,8 ms/tokjen    +5,5%, dostizhimo uderzhaniem karty
+
+Vtoraja chast v nashej vlasti: mezhdu peresechenijami processor schitaet smes, karta stoit, i chem
+dolshe stoit - tem dorozhe otvechaet. Podkachka ejo greet, no zanimaet rabochij potok i potomu v
+summe vredit (period 3 dajot sloj 29,72 protiv 27,71 u zamorozhennogo). Trivialnyj dispatch dlja
+progreva stoit pochti nichego - eto i nado sdelat.
