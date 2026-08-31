@@ -2326,7 +2326,41 @@ Chinit tak: sravnivat CPU/tok repliki s medianoj plecha i vybrasyvat vsjo, chto 
 chem na 30%. CPU/tok - horoshij storozh imenno potomu, chto ot nashih izmenenij on ne dolzhen
 zaviset vovse.
 
-## To zhe skladyvanie u STATIKI: 28,00 -> 22,97 ms, tokjen 17,16 -> 18,85 (+9,8%)
+## SKLADYVANIE CHTENIJA: 18,55 tok/s, +11,1%. Luchshij rezultat proekta
+
+Tri repliki, dva plecha, odin binarnik, vperemeshku i vstrechnym porjadkom. Pereklychatel
+MEMEX_FOLD_READBACK upravljaet OBOIMI skladyvanijami - i u ekspertov, i u statiki - tak chto eto
+ih summa.
+
+                     tok/s    razbros     sloj      karta     zhdjom
+    fold            18,550     4,2%      23,183    17,041     6,31
+    sep             16,112    11,1%      26,950    20,764     9,28
+    sep bez zagrjaznjonnogo kruga 1: 16,71 / 16,69 -> 16,70, razbros 0,1%
+
+Korrektnost: 192 iz 192 vo vseh shesti progonah, 0 rashozhdenij po 48 slotam.
+
+**Reshajut ne tok/s** (u fold razbros rovno na pole 4,2%), a parnye velichiny, obe chistye:
+sloj 23,18 protiv 26,95 pri razbrosah 2,9 i 3,8%, i karta 17,04 protiv 20,76 pri 0,6 i 2,5%.
+S ustrojstva snjato 7,5 ms, do tokjena doshlo 6,0.
+
+    etalon forka, chistyj processor     9,04 tok/s
+    nash processornyj put            11,98
+    predydushchij luchshij (frozen)   16,41
+    sejchas (period 32, adaptivno)   18,55    +54,8% k processornomu, 2,05x k etalonu
+
+**Vsjo eto vzjato iz odnogo defekta**, kotoryj sidel v trjoh mestah i vezde prjatalsja za odnoj i
+toj zhe myslju: "tam zhe vsego 46 KB, chto tam mozhet stoit". Obrashchenie k ustrojstvu stoilo DVA
+kruga vmesto odnogo, a cena kruga - 59 us nezavisimo ot chisla bajt.
+
+**Kak iskat ostalnye takie mesta:** podelit izmerennoe vremja operacii na ejo bajty i sravnit s
+polosoj ustrojstva. Vsjo, chto medlennee polosy v desjatki raz, - eto krugi, a ne peredacha.
+
+### Podrobno po statike (odna replika, chtoby vidno bylo mehanizm)
+
+                              bylo      stalo
+    zabor na peresechenie    0,109     0,002    ischez
+    ustrojstvo               0,459     0,462    +0,003 - kopija vnutri grafa pochti darom
+    na tokjen               28,00     22,97     -5,03 ms
 
 Odna replika, period 32, korrektnost cela (192 iz 192):
 
