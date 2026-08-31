@@ -76,11 +76,21 @@ function Test-Startable([string]$exe) {
 $RequiredDlls = @('ggml.dll','llama.dll','ggml-base.dll','mtmd.dll')
 
 function Test-Tree {
+    # NALICHIE NEDOSTATOCHNO, i eto stoilo vechera. V build-vk okazalas ggml.dll na 67 KB ot 26
+    # ijunja vmesto 46 MB - chuzhaja ili ustarevshaja, no PRISUTSTVUJUSHCHAJA, tak chto proverka na
+    # Test-Path ejo propuskala. Binarnik pri etom padal na zagruzchike s -1073741511 "tochka vhoda
+    # ne najdena", to est logi prihodili PUSTYMI i chitalis kak "progon ne dal dannyh".
+    #
+    # Porog v 1 MB uzhe byl - v tree_check.ps1, u sosednego proverjalshchika. Dva proverjalshchika,
+    # strogij i dyrjavyj, i polzovalis dyrjavym.
     $miss = @()
     foreach ($d in @('ggml.dll','llama.dll')) {
-        if (-not (Test-Path -LiteralPath (Join-Path $bin $d))) { $miss += $d }
+        $f = Join-Path $bin $d
+        if (-not (Test-Path -LiteralPath $f)) { $miss += ($d + " (net)"); continue }
+        $len = (Get-Item -LiteralPath $f).Length
+        if ($len -lt 1048576) { $miss += ($d + " (" + [math]::Round($len/1KB) + " KB - zaglushka)") }
     }
-    if ($miss.Count -gt 0) { return ("net bibliotek: " + ($miss -join ', ')) }
+    if ($miss.Count -gt 0) { return ("biblioteki negodny: " + ($miss -join ', ')) }
     return $null
 }
 
@@ -98,7 +108,11 @@ function Test-Tree {
 #
 # Rjadom s kopiej lezhit metka: kommit, iz kotorogo sobrano, i vremja. Ona ne uchastvuet v reshenii
 # (reshaet zapuskaemost), no bez nejo nevozmozhno ponjat, chto imenno lezhit v hranilishche.
-$vault = 'D:/MemeX/dll_vault'
+# ODNO HRANILISHCHE NA DVA DEREVA - eto byla oshibka. $bin uvazhaet -Dir, a $vault byl propisan
+# zhjostko, tak chto sborka bez Vulkan kladjot tuda 31-megabajtnuju ggml.dll, sborka s Vulkan -
+# 46-megabajtnuju, i vosstanovlenie podsovyvaet chuzhuju. Otkaz vygljadit kak -1073741511 "tochka
+# vhoda ne najdena" - huzhe otsutstvija, potomu chto prichinu iskat budut v kode.
+$vault = 'D:/MemeX/dll_vault/' + (Split-Path -Leaf $Dir)
 
 function Save-Vault {
     New-Item -ItemType Directory -Path $vault -Force -EA SilentlyContinue | Out-Null
@@ -184,8 +198,13 @@ try {
             Say "kopija ne podoshla - sobiraju polnostju"
         }
 
-        Say "chinju polnoj peresborkoj cepochki - eto rovno tot sluchaj, radi kotorogo skript napisan"
-        Invoke-Build (@('ggml','llama') + $Targets) $true
+        # BEZ --clean-first. Shapka etogo fajla objasnjaet, pochemu: on SNACHALA udaljaet vsjo, chto
+        # cel proizvodit, i tolko potom sobiraet, tak chto prervannaja pochinka ostavljaet derevo
+        # slomannym navsegda - imenno tak biblioteki ischezali tri raza. Ostavit ego v REMONTNOM
+        # puti znachilo ostavit tot zhe mehanizm tam, kuda popadajut imenno slomannye derevja.
+        # Obychnaja peresborka cepochki perezapisyvaet biblioteki, ne udaljaja ih zaranee.
+        Say "chinju peresborkoj cepochki ggml -> llama -> celi (bez ochistki)"
+        Invoke-Build (@('ggml','llama') + $Targets) $false
         if ($script:BuildRc -ne 0) { Say ("pochinka ne udalas, cmake vernul " + $script:BuildRc); exit $script:BuildRc }
         $still = @()
         $treeWhy = Test-Tree
