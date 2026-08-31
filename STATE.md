@@ -2503,3 +2503,53 @@ na kazhdom sloe vstroena v samu shemu, a ne v ejo realizaciju.
 a dat karte poslednim dejstviem zapisat flag v pamjat hosta i oprashivat ego - eto ubiraet perehod
 v jadro OS i planirovshchik iz kriticheskogo puti. Cena voprosa pri padenii 310 -> 60 us:
 49 x 250 us = **12,3 ms na tokjen, okolo 24 tok/s**.
+
+### Iz chego 310 mks: izmereno po chastjam, i eto NE nash hostovyj kod
+
+Tri pribora na odnoj konfiguracii (MEMEX_STATIC_TRUNC=1, odin uzel v grafe):
+
+    hostovaja chast do submita (suhoj prohod, deskriptory, prealloc)   3,4-7,1 us   min 0,2
+    submit                                                             20-29 us
+    ozhidanie zabora                                                   ~240 us
+    -------------------------------------------------------------------------------
+    vsego peresechenie                                                 277 us
+
+**Predlozhenie "predzapisat komandnye bufery" otpadaet:** vsjo, chto ona ubiraet, stoit 7 us iz
+277. Suhoj prohod i vydelenie deskriptorov ni pri chjom.
+
+Raspredelenie ozhidanija (6000 vyzovov, K=1):
+
+    <50 us     21
+    <100     1752
+    <200      267
+    <400     3254   <- sjuda popadajut 3136 generacionnyh peresechenij
+    <1000     193
+
+Odna i ta zhe operacija na odnoj karte vozvrashchaetsja to za 70 us, to za 300. Znachit eto ne
+pol, a peremennaja velichina.
+
+### Chem zanjata karta v promezhutke - vlijaet, i izmereno
+
+    static odin                          peresechenie 0,277 ms
+    static + rezidentnye eksperty        peresechenie 0,234 ms   (-16%)
+
+Bolee zanjataja karta otvechaet deshevle. Mezhdu dvumja peresechenijami vnimanija processor
+schitaet smes okolo 300 us, i karta v eto vremja prostaivaet polnostju; RDNA2 pri prostoe gasit
+graficheskoe jadro.
+
+**No prostaja versija etoj gipotezy neverna:** BOLSHE podkachek delaet peresechenie DOROZHE, a ne
+deshevle - period 3 dajot sloj 29,72 protiv 27,71 u zamorozhennogo. To est prisutstvie ekspertnogo
+KONTEKSTA kartu greet, a sami PRODVIZHENIJA derutsja za rabochij potok. Dva effekta v raznye
+storony, i ih vklad po otdelnosti ne razdeljon.
+
+Plan pitanija Windows uzhe "Maksimalnaja proizvoditelnost" - rychaga tam net, GFXOFF upravljaetsja
+drajverom.
+
+### Chto ostajotsja, s cenami
+
+    1. Ozhidanie zabora, ~240 us x 49 = 11,8 ms/tokjen. Perem
+       ennaja, ne pol. Ne razobrano do konca.
+    2. 272 us uzlov x 49 = 13,3 ms/tokjen. Sokratit graf s 29 uzlov do ~15 slijaniem QKV v odin
+       matmul i ffn-hvosta - pobitovo identichno, nash kod, ot drajvera ne zavisit. Okolo 6,5 ms.
+    3. Vnimanie na karte vtroe bystree processornogo (8,7 protiv 25,0 ms bez krugov) - znachit
+       cena krugov, a ne vybor ustrojstva, opredeljaet vsjo v etoj chasti.
