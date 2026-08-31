@@ -2259,3 +2259,31 @@ Variant 1 - samyj deshjovyj po risku i samyj dorogoj po otdache: esli vyhodnoj t
 zakrepljonnoj hostovoj pamjati, zaregistrirovannoj v Vulkan, karta pishet tuda posledim uzlom
 grafa (DMA-zapis, ne BAR), a host potom chitaet SVOJO OZU - besplatno. Ni vtoroj otpravki, ni
 zabora, ni chtenija po shine.
+
+## Chtenie, slozhennoe v komandnyj bufer grafa: -4,78 ms na tokjen
+
+Odna replika plecha `fold`, period 32, korrektnost cela (192 iz 192):
+
+                        bylo      stalo
+    graf               15,63     16,28    +0,65
+    chtenie             5,45      0,0017  ischezlo
+    ms_job             21,60     16,82    **-4,78 ms/tokjen**
+
+**Predskazanie bylo +2,7 ms, vyshlo +4,78, i oshibka pouchitelnaja.** Ja schital, chto kopija,
+pereehav vnutr grafa, prinesjot s soboj svoi 2,7 ms. Ona prinesla **0,65**. To est 5,45 ms byli
+pochti celikom KRUG obrashchenija k ustrojstvu, a sama peredacha 46 KB - shest sotyh
+millisekundy, kak i polozheno po shine.
+
+Obobshchenie, kotoroe stoit derzhat: **kogda operacija stoit na dva poriadka bolshe svoih bajtov,
+cena - eto krug, i ejo nado ubirat celikom, a ne uskorjat peredachu.** Ja proveril eto pered
+sborkoj (46 KB za 113 us eto 0,4 GB/s protiv ~8 us po shine) - i vsjo ravno zalozhil v prognoz
+polovinu ceny kak neustranimuju.
+
+Realizacija: `ggml_backend_vk_arm_readback` v ggml-vulkan.cpp zapisyvaet kopiju v tot zhe
+komandnyj bufer, chto i posledinj uzel grafa. Tolko posledinj uzel - bolee rannij submit
+skopiroval by vyhod, kotoryj graf eshchjo ne dopisal. Poluchatel objazan byt zakrepljonnym:
+togda ggml_vk_buffer_read_2d_async zapisyvaet prostoj copyBuffer bez promezhutochnogo bufera i
+bez otlozhennyh memcpy, i skladyvat ejo bezopasno. Pri otkaze - staryj put, huzhe ne stanovitsja.
+
+Pereklychatel MEMEX_FOLD_READBACK=0 vozvrashchaet staroe povedenie; vetka nazyvaet sebja strokoj
+FOLD_READBACK on|off, skript sverjaet (pravilo 68).
