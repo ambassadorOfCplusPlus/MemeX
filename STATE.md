@@ -2437,3 +2437,43 @@ Instrument, kotoryj ego razdelit: SREZ GRAFA PO UZLAM. Sobirat tot zhe graf vnim
 obrezannyj na uzle K, i chitat vremja ustrojstva. Prirashchenie ot K k K+1 - istinnaja cena uzla K
 vmeste s ego barjerom i otpravkoj. Metki vremeni po uzlam etogo ne dajut: barjer pripisyvaet
 malenkoj operacii sliv bolshoj. Srez ne mozhet oshibitsja - barjer vhodit v to, chto ubrali.
+
+## SREZ GRAFA: 310 mks postojannoj ceny na kazhdoe peresechenie. 28% tokjena
+
+Sposob: MEMEX_STATIC_TRUNC=N stroit graf sloja tolko do etapa N. Vyhod pri etom NEVERNYJ - eto i
+delaet ego instrumentom (pravilo 73): vremja ustrojstva ot znachenij ne zavisit, znachit
+prirashchenie ot etapa k etapu - istinnaja cena udaljonnyh uzlov vmeste s ih barjerami i
+otpravkami. Metki po uzlam etogo ne dajut (METHODS 80).
+
+    K=1   1 uzel  (tolko norma vhoda)   0,310 ms   <-- ODIN uzel
+    K=2  10 uzlov (+ proekcii q,k,v)    0,453
+    K=3   9 uzlov                       0,419
+    K=5  19 uzlov (+ kq)                0,501
+    K=7  23 uzla  (+ kqv)               0,502
+    K=8  25 uzlov (+ o_proj)            0,570
+    K=0  29 uzlov (polnyj graf)         0,582
+
+**Odin uzel - fused_rms_norm na 2048 chislah, 8 KB - stoit 0,310 ms. 53% vsego peresechenija.**
+
+Uchjot skladyvaetsja tochno:
+
+    postojannaja cena peresechenija     310 us
+    28 uzlov x 9,7 us                   272
+    ------------------------------------------
+    itogo                               582   izmereno 582
+
+**Delo ne v uzlah i ne v jadrah.** Est fiksirovannye 310 us na kazhdyj vyzov graph_compute,
+kotorye platjatsja dazhe za odin trivialnyj uzel. Na 49 peresechenij eto **15,2 ms na tokjen,
+28% tokjena.**
+
+Vot pochemu vsjo, chto ja proverjal, davalo nol: barjery, otpravki, ROPE, chislo uzlov - oni vse
+pro te 272 us, a ne pro 310. I 9,7 us na uzel blizko k izmerennym ranee 7,2, to est tot naklon
+byl VEREN - on prosto meril ne to, chto sostavljaet cenu.
+
+**Gde iz etogo 20+.** Odno peresechenie vmesto 49 ekonomit 14,9 ms: tokjen 53,9 -> 39 ms, to est
+**25,6 tok/s**. Prepjatstvie izvestno: vnimanie sloja L+1 trebuet vyhoda MoE sloja L, kotoryj
+schitaet processor, znachit odnim grafom 48 sloev ne sobrat, poka MoE na processore.
+
+**Chto neizvestno i merjaetsja sledujushchim.** Iz chego sostojat 310 us. Ranee pol graph_compute
+s zaborom byl izmeren v 59 us - vpjatero menshe. Libo tot zamer byl v drugih uslovijah, libo zdes
+est chto-to eshchjo. Do etogo otveta ljuboj plan po sokrashcheniju peresechenij prezhdevremenen.
