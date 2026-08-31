@@ -2689,3 +2689,38 @@ byl plechom bez podtverzhdenija, i ego rezultat nedejstvitelen** - peremenaja mo
 processa, i togda 25,92 protiv 24,72 eto chistyj shum, chto s nim i sovpadaet.
 
 Ispravleno: vse tri pechatajut sostojanie.
+
+## Gemma 4 generiruet. 5,94 tok/s, i eto paritet s etalonom
+
+    nash put         5,94 tok/s
+    etalon forka     6,04
+    bajtovyj potolok 7,7   (3,241 GB/tokjen pri 24,8 GB/s)
+
+**Chto meshalo, i eto okazalos ne to, chto napisano v zaprete.** Zapret stojal na vsej vetke
+`--gen`, no privjazany k geometrii byli tolko NEOBJAZATELNYE moduli - zonnyj kesh, rezidentnyj
+nabor, polovina na karte - i kazhdyj iz nih otkazyvaet sam, po imeni, vyshe. Chistaja processornaja
+generacija ni k chemu ne privjazana: `build_gemma4_step` proveren (vse zondy 0,0000%), kesh davno
+po-slojnyj.
+
+Meshali chetyre zhjostkih vyzova `build_step` v samom cikle - mimo dispetchera `build_one`, kotoryj
+vse tri arhitektury i tak umeet. Zamena na dispetcher po arhitekture v dvuh mestah iz chetyrjoh
+(prefill i obychnyj dekod; rasshcheplennyj i zonnyj nuzhny modulam, kotorye dlja gemma4 zapreshcheny).
+
+### Nash processornyj put na Gemma NE bystree etalona, i eto ob'jasnimo
+
+    Qwen 30B:  nash 11,98 protiv etalona 9,04  -> +32%
+    Gemma 26B: nash  5,94 protiv etalona 6,04  -> paritet
+
+U Qwen 53% trafika - eksperty, i vsja nasha rabota nad processornoj polovinoj byla imenno tam.
+U Gemma eksperty ne glavnoe: vnimanie 1125 MiB, plotnye FFN 543, golova 748. Nashi optimizacii
+lezhat v drugoj chasti tokjena.
+
+### Zato karta dolzhna dat Gemma BOLSHE, chem Qwen
+
+Dolja statiki v trafike u Gemma **67%** protiv 47% u mx1, a statika - eto to, chto perenositsja na
+kartu s otdachej 1,00. Perenos snimet s processornoj shiny dve treti trafika vmesto poloviny.
+
+`--gpu-static-layers` dlja gemma4 poka ZAPRESHCHJON po imeni, namerenno: GpuStatic stroit odin graf
+sloja i povtorjaet ego na vseh, a u Gemma iz tridcati sloev dvadcat pjat so skolzjashchim oknom,
+golovy 16/2 po 512 cheredujutsja s 16/8 po 256, masshtab vnimanija edinica vmesto 1/sqrt(d).
+Molchalivyj nevernyj otvet zdes huzhe otkaza. Sledujushchaja rabota - razvesti graf statiki po slojam.
