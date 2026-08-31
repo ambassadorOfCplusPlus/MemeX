@@ -2210,3 +2210,33 @@ Izmenenie ostavleno: ono ne vredit, ubiraet skrytuju gonku dvuh potokov za obshc
 **Pravilo, kotoroe iz etogo sleduet.** Pered tem kak stroit plecho, nazvat SVJAZYVAJUSHCHIJ
 RESURS i proverit, chto plecho ego menjaet. Esli oba plecha tratjat ego odinakovo - zamer
 pustoj, i eto vidno na bumage.
+
+## Iz chego sostoit dispatch: uchjot zakryt, i 27% tokjena okazalos ne tam, gde ja iskal
+
+Tri repliki, period 32, odno plecho. Chetyre tajmera vnutri compute() nazyvajut vsjo, chto ona
+delaet, i summa shoditsja s ms_job s tochnostju 0,7% - eto pogreshnost samogo instrumenta.
+
+    graf      15,63 ms/tokjen   72,4%   razbros 4,0%
+    chtenie    5,45             25,2%           2,8%
+    razbor     0,21              1,0%
+    vhod       0,16              0,7%
+    ostatok    0,15              0,7%
+              -----
+              21,60                             3,6%
+
+**Chtenie rezultata obratno stoit 5,45 ms na tokjen - 113 us na sloj za 46 KB.** Pol odnogo
+kruga submit+zabor izmeren ranee kak 59 us, i 113 - eto rovno dva takih kruga:
+`ggml_backend_graph_compute` otpravljaet i zhdjot zabor, potom `ggml_backend_tensor_get`
+otpravljaet i zhdjot VTOROJ. Bajty tut ni pri chjom - 46 KB po shine eto mikrosekundy.
+
+Esli dopisat kopiju rezultata v tot zhe komandnyj bufer, chto i matmuly, krug ostajotsja odin:
+**okolo 2,8 ms na tokjen, poriadka 4,6%**. Eto schitannaja cena, a ne ozhidanie.
+
+**Graf: 326 us na sloj pri 104 us bajtov.** Vychest pol v 59 us - ostajotsja 267 us schjota na
+dannye, kotorye chitajutsja za 104. To est jadra mul_mat_id po IQ4_XS v Vulkan idut primerno na
+38% polosy videopamjati. Eto uzhe ne organizacija raboty, a effektivnost samih jader.
+
+**Pochemu eto vazhnee vsego, chem ja zanimalsja segodnja.** 21,6 ms iz tokjena v 61 ms - eto
+35%, i iz nih na bajty prihoditsja 5,0. Ostalnye 16,6 ms - 27% tokjena - eto organizacija
+raboty i neeffektivnost jader. Predskazatel, period i sposob ozhidanija borolis za 6-9% v
+drugoj chasti tokjena.
