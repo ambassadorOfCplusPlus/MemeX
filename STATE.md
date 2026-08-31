@@ -2287,3 +2287,41 @@ bez otlozhennyh memcpy, i skladyvat ejo bezopasno. Pri otkaze - staryj put, huzh
 
 Pereklychatel MEMEX_FOLD_READBACK=0 vozvrashchaet staroe povedenie; vetka nazyvaet sebja strokoj
 FOLD_READBACK on|off, skript sverjaet (pravilo 68).
+
+### A/B slozhennogo chtenija: 4,21 ms s karty snjaty, tokjen ne uskorilsja
+
+Tri repliki, dva plecha, odin binarnik, vperemeshku i vstrechnym porjadkom.
+
+                 tok/s   razbros    karta/tok  zhdjom  CPU/tok
+    fold        16,902     3,8%       16,850    6,38    15,06
+    sep         15,354    26,9%       21,056    8,82    18,11
+    sep bez zagrjaznjonnogo kruga 1: 16,72 / 16,74 -> 16,73, razbros 0,1%
+
+**Vremja karty upalo na 4,21 ms - chisto, razbros 0,4%, rovno kak obeshchalo razlozhenie.
+Tokjen ne uskorilsja: +1,0%, pod porogom.** Korrektnost cela vo vseh shesti progonah.
+
+Kuda deli 4,21 ms: dzhojn-ozhidanie upalo s 8,82 do 6,38, to est 2,4 ms karta prosto perestala
+zastavljat processor zhdat. Ostalnoe rastvorilos - vremja sloja ne sokratilos.
+
+**GLAVNOE, i ono menjaet porjadok vsej dalnejshej raboty:**
+
+    do:     karta 21,06   processor 15,06    karta dlinnee na 6,0
+    posle:  karta 16,85   processor 15,06    raznica 1,8
+
+**Karta perestala byt uzkim mestom.** Znachit 11 ms nakladnyh v jadrah mul_mat_id, za kotorye ja
+sobiralsja bratsja sledujushchim shagom, **teper pochti nichego ne stojat**: uskorjat uzhe ne
+dlinnuju storonu, vyigrysh ujdjot v ozhidanie celikom. Sledujushchij shag lezhit na PROCESSORNOJ
+polovine.
+
+Izmenenie ostavleno: raboty objektivno menshe, korrektnost cela, karta bolshe ne dlinnaja
+storona. No uskoreniem eto nazyvat nelzja.
+
+### Dyrka v obvjazke, najdennaja etim progonom
+
+Plecho `sep` v kruge 1 dalo CPU/tok 25,15 pri normalnyh 14,6 - mashina byla zanjata. Skript etogo
+NE otbrakoval: u nego porog po razbrosu MEZHDU replikami, a ne po anomalii VNUTRI odnoj. Odna
+isporchennaja replika iz trjoh razdula razbros plecha do 26,9% i chut ne pohoronila vyvod.
+
+Chinit tak: sravnivat CPU/tok repliki s medianoj plecha i vybrasyvat vsjo, chto othoditsja bolshe
+chem na 30%. CPU/tok - horoshij storozh imenno potomu, chto ot nashih izmenenij on ne dolzhen
+zaviset vovse.
