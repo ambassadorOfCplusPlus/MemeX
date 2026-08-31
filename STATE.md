@@ -2852,3 +2852,25 @@ ves na karte primerno vdesjatero bolshe nastojashchego (11,22 protiv 1,18 - otno
 Sledujushchij shag ne dogadka, a instrument: u modulja est kljuch `verify` - "prochitat kazhdyj
 vygruzhennyj bajt obratno i sravnit s tenzorom modeli, iz kotorogo on vzjat". Imenno on i nazovjot,
 kakoj slot razjehalsja. Sloty 9..12 dobavleny mnoju segodnja, i imenno oni pod podozreniem.
+
+### Vesa na karte pobajtovo verny - znachit delo v VYCHISLENII
+
+Dopisana proverka `verify_layers`: kazhdyj vygruzhennyj tenzor sloja chitaetsja obratno i
+sravnivaetsja s modelju, slot za slotom. Vkljuchaetsja tem zhe `--gpu-static-verify`.
+
+    bajty vesov sloev v videopamjati sovpadajut s modelju: 30 sloev x 13 slotov
+
+**Gipoteza "v slot popal ne tot tenzor" OPROVERGNUTA.** Ona byla postroena na arifmetike
+(11,22 protiv 1,18 - otnoshenie 9,5) i vygljadela ubeditelno; proverka instrumentom ejo zakryla.
+
+**Chto iz etogo sleduet, i eto sil'noe suzhenie.** Normirovka po srednekvadratichnomu UBIRAET
+masshtab vhoda: na vyhode vsegda velichina porjadka samogo vesa, kakov by ni byl vhod. Vesa verny,
+operacija ta zhe (`ggml_fused_rms_norm`), eps tot zhe. Vyhod bolshe etalonnogo v 9,5 raza.
+
+Tak mozhet byt tolko esli JADRO schitaet ne to, chto my dumaem - naprimer, normiruet po drugoj osi
+ili inache vedjot sebja na forme Gemma. U nejo shirina 2816 protiv 2048 u qwen3moe, i eto pervoe,
+chto stoit proverit: postavit odin uzel fused_rms_norm na [2816,1] na kartu i na processor s odnimi
+i temi zhe vhodom i vesom, i sravnit. Esli razojdutsja - eto bekend, a ne nash graf.
+
+Instrument dlja etogo uzhe est: MEMEX_STATIC_TRUNC=1 stroit graf iz ODNOGO uzla - imenno normy
+vhoda - i sravnit ego vyhod s processornym mozhno tem zhe zondom.
