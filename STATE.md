@@ -2553,3 +2553,37 @@ drajverom.
        matmul i ffn-hvosta - pobitovo identichno, nash kod, ot drajvera ne zavisit. Okolo 6,5 ms.
     3. Vnimanie na karte vtroe bystree processornogo (8,7 protiv 25,0 ms bez krugov) - znachit
        cena krugov, a ne vybor ustrojstva, opredeljaet vsjo v etoj chasti.
+
+## Otzyv moej zhe kritiki: 2,99 mks na uzel bylo VERNO, i rezat uzly nechego
+
+Ubral dva ggml_concat iz grafa sloja (tri vzvedjonnyh chtenija vmesto odnogo - vozmozhno tolko
+posle togo, kak chtenie slozhili v komandnyj bufer). Izmereno:
+
+    SPLIT_OUT=1   27 uzlov, 17 dispatchej   peresechenie 0,466 ms   17,3137 tok/s   48/48
+    SPLIT_OUT=0   29 uzlov, 19 dispatchej   peresechenie 0,464 ms   17,3130 tok/s   48/48
+
+**Nichego.** Ozhidal 29 us na peresechenie.
+
+**Ja byl neprav, kogda objavil izmerennye 2,99 mks na uzel nedejstvitelnymi.** Srez dal 9,7, no
+9,7 = (582 - 310)/28, i v eti 272 us vhodit NASTOJASHCHAJA rabota matmulov - okolo 190 us bajtov.
+Vychest ih: (272 - 190)/28 = **2,9 mks na uzel**. Ishodnoe chislo verno; neverno bylo moe delenie -
+ja pripisal peremeshchenie bajtov nakladnym rashodam. I versija agenta pro 11,6-20 us na dispatch
+tozhe neverna.
+
+Znachit i staryj vyvod "rezat uzly dajot maksimum 0,5%" veren. Podtverzhdjon dvazhdy: raschjotom i
+zamerom.
+
+**Sostav peresechenija v RABOCHEJ konfiguracii (s ekspertami, karta ne uspevaet ostyt):**
+
+    postojannaja cena (graf iz odnogo uzla)   234 us   <- 11,5 ms/tokjen, 21%
+    bajty matmulov                            190
+    nakladnye 28 uzlov                         40
+    ------------------------------------------------
+                                              464 us
+
+Izmenenie ostavleno: uzlov menshe, vreda net, i prichina sushchestvovanija etih dvuh concat
+ischezla. No uskoreniem ne javljaetsja.
+
+**Ostajotsja odna krupnaja statja: 234 us postojannoj ceny x 49 peresechenij.** Vsjo ostalnoe v
+etoj chasti izmereno i malo. Urok metoda: prirashchenie sreza soderzhit i rabotu, i nakladnye -
+delit ego na chislo uzlov mozhno tolko posle vychitanija bajtov.
