@@ -2240,3 +2240,22 @@ dannye, kotorye chitajutsja za 104. To est jadra mul_mat_id po IQ4_XS v Vulkan i
 35%, i iz nih na bajty prihoditsja 5,0. Ostalnye 16,6 ms - 27% tokjena - eto organizacija
 raboty i neeffektivnost jader. Predskazatel, period i sposob ozhidanija borolis za 6-9% v
 drugoj chasti tokjena.
+
+### Tri sposoba ubrat chtenie, s cenami
+
+Napravlenie reshaet vsjo: zapis na kartu izmerena v 0,003 ms, chtenie s karty - 0,116. Sorok raz,
+i eto fizika, a ne nastrojka - zapisi cherez otobrazhenie objedinjajutsja v pakety, chtenija net.
+
+    1. vyhod srazu v ZAKREPLJONNUJU pamjat hosta   ~5,4 ms/tok   pravka provodki vyhoda
+    2. slit chtenie s otpravkoj grafa               ~2,8 ms/tok   hirurgija v graph_compute
+    3. karta vladeet slojem celikom                ~11+ ms/tok   perestrojka
+
+Variant 3 - eto ne pravka. Slozhenie polovin delaetsja V PROCESSORNOM grafe
+(`ggml_add(o_res, o_oth)`, memex-fwd.cpp:2400), to est karta u nas ne hozjain sloja, a vyzyvaemaja
+sluzhba; vnimanie na karte ustroeno tak zhe. Chtoby karta vladela slojem, nado perestroit graf
+sloja, a ne peredelat odin vyzov.
+
+Variant 1 - samyj deshjovyj po risku i samyj dorogoj po otdache: esli vyhodnoj tenzor lezhit v
+zakrepljonnoj hostovoj pamjati, zaregistrirovannoj v Vulkan, karta pishet tuda posledim uzlom
+grafa (DMA-zapis, ne BAR), a host potom chitaet SVOJO OZU - besplatno. Ni vtoroj otpravki, ni
+zabora, ni chtenija po shine.
