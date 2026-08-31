@@ -132,6 +132,11 @@ function RunOnce($tag, [string[]]$extra, [int]$limitSec) {
     if (Test-Path $so) { $out += Get-Content -LiteralPath $so -Encoding UTF8 }
     if (Test-Path "$so.err") { $out += Get-Content -LiteralPath "$so.err" -Encoding UTF8 }
     $res = @{ err = '' }
+    # BATCH_WAIT prints once, to stderr, and $out already holds both streams. It MUST be
+    # matched against $out - an earlier version of this matched it against the PROMO_AB line
+    # and would have discarded every round for a mismatch that could not occur.
+    $bw = $out | Select-String -Pattern 'BATCH_WAIT (spin|sleep)' | Select-Object -First 1
+    if ($bw -and $bw.Line -match 'BATCH_WAIT (spin|sleep)') { $res.wait_mode = $Matches[1] }
     $h = $out | Select-String -Pattern '^STATIC_AB ' | Select-Object -First 1
     if ($h -and $h.Line -match 'our_tok_s ([\d.]+) ref_tok_s ([\d.]+)') {
         $res.gen = [double]$Matches[1]
@@ -143,7 +148,6 @@ function RunOnce($tag, [string[]]$extra, [int]$limitSec) {
     if ($p2) {
         $ln = $p2.Line
         if ($ln -match 'match (\d+) of (\d+)')       { $res.match = [int]$Matches[1]; $res.of = [int]$Matches[2] }
-        if ($ln -match 'BATCH_WAIT (spin|sleep)')    { $res.wait_mode = $Matches[1] }
         if ($ln -match ' promo (\d+) batches (\d+)') { $res.promo = [int]$Matches[1]; $res.batches = [int]$Matches[2] }
         if ($ln -match 'promo_ms_tok ([\d.]+)')      { $res.promo_ms = [double]$Matches[1] }
         if ($ln -match 'ms_per_promo ([\d.]+)')      { $res.per_promo = [double]$Matches[1] }
