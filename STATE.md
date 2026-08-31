@@ -2184,3 +2184,29 @@ promezhutochnye velichiny chishche konechnoj.
 
 Pobochno: `submit+zabor` podtverzhdjon tretij raz - 0,957 i 0,955 pri razbrosah 4,2 i 4,0%,
 edinstvennye chistye stroki vo vsjom razlozhenii podkachki.
+
+## Spin protiv blokirujushchego ozhidanija: nichego. I prichina byla vidna do sborki
+
+    spin         13,902 tok/s   razbros 6,0%   RAZBROS VYSHE POROGA
+    sleep        14,226         razbros 2,8%
+
++2,3% pri pole shuma 4,2% i odnom plече vyshe poroga. Ne rezultat. Predskazanie bylo +6,9%.
+
+**Pochemu predskazanie bylo nevernym, i eto schitalos zaranee.** Ja zhdal vyigrysha ot togo, chto
+osvobozhdaetsja JADRO. No svjazyvajushchij resurs - ne jadro, a POTOK: spin i blokirujushchee
+ozhidanie derzhat rabochij potok odinakovoe stennoe vremja. Oba plecha zanimajut ego rovno tak zhe,
+znachit zamer ne mog pokazat nichego. Arifmetika na dvuh strochkah, i ejo nado bylo sdelat do
+sborki, a ne posle progona.
+
+**Chto eto utochnjaet v mehanizme zamorozhennogo nabora - i utochnjaet v poleznuju storonu.**
+Delo ne v konkurencii za jadro. Delo v tom, chto podkachka zanimaet TOT ZHE rabochij potok,
+kotorogo zhdjot dispatch: u GpuExperts odin potok i on sluzhit dvum gospodam. Znachit
+asinhronnaja otpravka - edinstvennoe, chto dejstvitelno otpuskaet potok - po-prezhnemu imeet
+smysl, a zamena sposoba ozhidanija smysla ne imela.
+
+Izmenenie ostavleno: ono ne vredit, ubiraet skrytuju gonku dvuh potokov za obshchij zabor
+(u peredach teper svoj) i dajot pereklychatel GGML_VK_BATCH_SPIN dlja budushchih zamerov.
+
+**Pravilo, kotoroe iz etogo sleduet.** Pered tem kak stroit plecho, nazvat SVJAZYVAJUSHCHIJ
+RESURS i proverit, chto plecho ego menjaet. Esli oba plecha tratjat ego odinakovo - zamer
+pustoj, i eto vidno na bumage.
