@@ -2040,6 +2040,10 @@ statji zakryta pravilno.
 Sled koda, 2914 tokenov, obuchenie 0..2039, ocenka 2103..2914 (811 tokenov), 46 sloev, C=16.
 Sravnenie na odnoj i toj zhe trasse, v odnom progone, pri ravnom chisle podkachek na tokjen.
 
+**Podtverzhdeno na drugih emkostjah**, chtoby vyvod ne okazalsja svojstvom C=16: pri C=12 i C=24
+kartina ta zhe - 57 otricatelnyh tochek protiv 8, luchshee v rabochej oblasti +1,21 punkta pri
+0,33 podkachki. Maksimum +2,67 opjat tam zhe, gde on bespolezen - pri 46 podkachkah na tokjen.
+
 **Iz 97 tochek 89 otricatelnyh i 8 polozhitelnyh.** Luchshaja - +1.85 punkta pri 46 podkachkah na
 tokjen, chto pri 1.306 ms kazhdaja stoit 60 ms pri tokene v 61.2, to est udvaivaet tokjen. V
 rabochej oblasti (1-9 podkachek) luchshee, chto est, - +0.60 punkta. Porog otkaza byl +4.
