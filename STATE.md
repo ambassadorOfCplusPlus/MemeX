@@ -2648,3 +2648,44 @@ portilo pribor: zdes ukol sdvinul tu samuju velichinu, po kotoroj stroilas gipot
 
 Kod ostavlen za pereklychatelem MEMEX_KEEPWARM=0 po umolchaniju - on ne vredit, poka vykljuchen, i
 sluzhit gotovym plechom, esli pol 310 us kogda-nibud okazhetsja svjazan s pitaniem.
+
+## Revju koda: tri defekta, i odin b'jot po moim zhe zameram
+
+### Kriticheskij: progrevochnyj ukol byl nevernym ispolzovaniem Vulkan
+
+Ukol bral komandnyj bufer iz `transfer_cmd_pool` i nikogda ego ne zhdal, a
+`ggml_vk_graph_cleanup` v konce KAZHDOGO `graph_compute` bezuslovno delaet `resetCommandPool` na
+tom zhe pule. Sbros pula, poka ego bufer eshchjo ispolnjaetsja, - narushenie specifikacii. Vremena
+perekryvajutsja (ukol 310-486 us protiv sloja 450-600), to est eto ne gipoteticheskaja gonka.
+
+Proverka "192 iz 192" etogo ne pojmala by nikogda: otkaz vygljadit kak sboj drajvera pod
+nagruzkoj. **Udaljon celikom**, a ne ostavlen za flagom - "oprovergnuto I nebezopasno" ne stoit
+derzhat v dereve.
+
+### Vazhnyj, i on pro moi chisla: schjotchiki priborov byli obshchimi na dva konteksta
+
+`FENCE_SPLIT`, `HOST_SPLIT` i `GAP_WAIT` derzhali sostojanie v funkcionalnyh statikah - odin nabor
+na process, pri DVUH kontekstah Vulkan (vnimanie i eksperty), rabotajushchih na RAZNYH potokah.
+Eto i gonka, i - huzhe - smeshivanie 29-uzlovogo peresechenija vnimanija s 3-uzlovym ekspertnym
+dispatchem v odno srednee.
+
+**Znachit vse chisla GAP_WAIT, snjatye pri oboih bekendah, byli smesju dvuh raznyh velichin.** Ja
+eto podozreval i pytalsja razvesti, zapustiv bez ekspertov, no tam vyborki okazalis po 46 i 281
+vyzov. Teper ponjatno pochemu.
+
+Ispravleno: schjotchiki perenesены v `ggml_backend_vk_context`, u kazhdogo konteksta svoj
+`instr_id`, kotoryj pechataetsja. Chisla nado peresnjat.
+
+**Chto iz vyvodov ustojalo:** progrev oprovergnut VMESHATELSTVOM (-0,7%), a ne korreljaciej, i
+etot vyvod ne zavisit ot zagrjaznjonnyh vedjor. Pol v 310 us tozhe izmeren srezom grafa, a ne
+etim priborom.
+
+### Vazhnyj: tri plecha ne pechatali svojo sostojanie
+
+`MEMEX_SPLIT_OUT`, `MEMEX_FOLD_READBACK` i `MEMEX_NO_ROPE` v `gpu_static.cpp` chitalis iz
+okruzhenija i menjali formu grafa, no nichego ne pechatali - prjamoe narushenie pravila 68 v moem
+zhe kode. U `SPLIT_OUT` podtverzhdenie sluchajno bylo (chislo uzlov 27 protiv 29), a **opyt s ROPE
+byl plechom bez podtverzhdenija, i ego rezultat nedejstvitelen** - peremenaja mogla ne dojti do
+processa, i togda 25,92 protiv 24,72 eto chistyj shum, chto s nim i sovpadaet.
+
+Ispravleno: vse tri pechatajut sostojanie.
