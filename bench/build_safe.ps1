@@ -140,9 +140,25 @@ function Restore-Vault {
     return $true
 }
 
+# VSEGDA CEPOChKA, nikogda odna cel. Prichina najdena i vosproizvodima v dve komandy:
+#
+#   cmake --build build-vk --target ggml              -> ggml.dll na meste
+#   cmake --build build-vk --target llama-memex-fwd   -> ggml.dll UDALENA, oshibok nol
+#
+# MSBuild pri sborke zavisimoj celi obhodit proekt ggml, reshaet chto tot ustarel (iz-za shaga
+# 'Auto build dll exports', kotoryj peresozdajot fajl eksportov), UDALJAET staryj vyhod i zatem ne
+# komponuet zanovo, potomu chto objektnye fajly ne menjalis. Otkaz molchalivyj: kod vozvrata nol,
+# oshibok net, binarnik posle etogo padaet na zagruzchike DO pervoj stroki vyvoda, i pustoj log
+# chitaetsja kak 'progon ne dal dannyh'.
+#
+# Eto i est vse chetyre istoricheskih ischeznovenija: kazhdoe shlo posle sborki ODNOJ celi. I eto
+# zhe objasnjaet, pochemu --clean-first kazalsja lekarstvom - on zastavljal peresobrat vsjo, to est
+# sluchajno zakryval dyru, kotoruju sam zhe rasshirjal.
 function Invoke-Build([string[]]$t, [bool]$c) {
+    # Cepochka celikom, vsegda. Sm. kommentarij vyshe: sborka odnoj celi udaljaet ggml.dll.
+    $chain = @('ggml','llama') + ($t | Where-Object { $_ -ne 'ggml' -and $_ -ne 'llama' })
     $a = @('--build', $Dir, '--config', 'Release', '-j', "$Jobs")
-    foreach ($x in $t) { $a += @('--target', $x) }
+    foreach ($x in $chain) { $a += @('--target', $x) }
     if ($c) { $a += '--clean-first' }
     $out = & cmake @a 2>&1
     $script:BuildRc = $LASTEXITCODE
