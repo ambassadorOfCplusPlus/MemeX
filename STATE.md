@@ -2617,3 +2617,34 @@ Vtoraja chast v nashej vlasti: mezhdu peresechenijami processor schitaet smes, k
 dolshe stoit - tem dorozhe otvechaet. Podkachka ejo greet, no zanimaet rabochij potok i potomu v
 summe vredit (period 3 dajot sloj 29,72 protiv 27,71 u zamorozhennogo). Trivialnyj dispatch dlja
 progreva stoit pochti nichego - eto i nado sdelat.
+
+## Progrev karty: oprovergnut. Korreljacija byla ne prichinoj
+
+`ggml_backend_vk_keepwarm` - odna 256-bajtnaja kopija bez ozhidanija, srazu posle chtenija
+rezultata sloja, to est v tot moment, kogda karta ostajotsja bez raboty na 1,5 ms.
+
+                       tok/s    peresechenie   zabor
+    progrev vkljuchjon 16,0363    0,524 ms     0,031
+    progrev vykljuchen 16,1471    0,511        0,002
+
+**Huzhe na 0,7%.** Predskazyval +14%. Cena samogo ukola vidna v stroke zabor: 0,002 -> 0,031.
+
+**Pochemu korreljacija obmanula, dva otvechenija:**
+
+1. Pribor stal merit ne to. Promezhutok schitalsja ot zaversheniia PREDYDUSHCHEGO zabora, a s
+   progrevom predydushchim zaborom stanovitsja sam ukol. Gistogramma eto pokazala: v bystrom vedre
+   1397 vyzovov vmesto 2661.
+2. I glavnoe: ozhidanie v bystrom vedre S progrevom 332,3 us protiv 311,9 BEZ nego. To est dazhe
+   tam, gde karta zavedomo ne spala, luchshe ne stalo.
+
+Znachit svjaz "dolshe prostoj -> dorozhe otvet" byla **korreljaciej, a ne prichinoj**. Chto-to
+tretje delaet i promezhutok dlinnym, i otvet dorogim - veroatnee vsego eto sloi, gde processornoj
+polovine dostalos bolshe raboty.
+
+**Urok metoda, i on obshchij.** Korreljacija mezhdu dvumja izmerennymi velichinami ne nazyvaet
+prichinu, dazhe kogda mehanizm zvuchit ubeditelno (RDNA2 gasit jadro v prostoe - eto pravda, no ne
+otvet). Proverjaetsja tolko vmeshatelstvom. I vmeshatelstvo nado stroit tak, chtoby ono ne
+portilo pribor: zdes ukol sdvinul tu samuju velichinu, po kotoroj stroilas gipoteza.
+
+Kod ostavlen za pereklychatelem MEMEX_KEEPWARM=0 po umolchaniju - on ne vredit, poka vykljuchen, i
+sluzhit gotovym plechom, esli pol 310 us kogda-nibud okazhetsja svjazan s pitaniem.
