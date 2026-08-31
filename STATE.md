@@ -2385,3 +2385,55 @@ operacija stoit na dva porjadka bolshe svoih bajtov, iskat nado krug, a ne polos
 Ostavshiesja mesta togo zhe roda stoit iskat po tomu zhe priznaku: podelit izmerennoe vremja
 operacii na ejo bajty i sravnit s polosoj ustrojstva. Vsjo, chto medlennee polosy v desjatki raz,
 - eto krugi.
+
+## Barjery: oprovergnuty. Otpravki: ih dva, a ne shest. Razryv 119/25 GB/s ostajotsja
+
+### Suzhennye barjery ne dajut nichego
+
+    narrow (GGML_VK_NARROW_SYNC=2)   18,242 tok/s   sloj 23,487
+    full                             17,807         sloj 23,163
+    po chistym krugam full daže bystree: 18,57/18,91 -> 18,74 protiv 18,24
+
+Bezuslovnyj polnyj barjer pered kazhdym dispatchem - ne prichina. Odin kandidat iz trjoh vybyl.
+
+### Otpravok dva na graf, a ne 6,62
+
+GGML_VK_SUBMIT_STATS na tekushchej sborke:
+
+    uzlov v splite 29: grafov 624, submitov **2,00** na graf
+    vsego: grafov 2518, uzlov 24084 (9,6 na graf), submitov 3428 (1,36 na graf)
+
+Cifra 6,62 iz `submit_policy.log` - staryj svip, snjatyj do togo, kak
+`GGML_VK_SUBMIT_DIVISOR=1` i `TAIL=0` stali umolchaniem dlja `--gpu-static-layers`
+(memex-fwd.cpp:5705, do sozdanija ustrojstva - to est primenjaetsja).
+
+Dva vmesto odnogo - eto lishnjaja otpravka na kazhdoe peresechenie: 24,1 us x 49 = **1,18 ms na
+tokjen**, okolo 2%. Merjaetsja DIVISOR=0 protiv 1.
+
+### Chto ostajotsja neobjasnjonnym, i eto glavnoe
+
+Nash zhe otchjot, chetyre stroki drug ot druga:
+
+    golova na karte:          2,049 ms na 243,4 MB  ->  119 GB/s   (1 dispatch)
+    vnimanie i marshrutizator: 0,476 ms na  12,1 MB  ->   25,4 GB/s (29 uzlov, 2 otpravki)
+
+Odna karta, odin progon, odno semejstvo jader. Raschjot dlja peresechenija vnimanija:
+
+    bajty                       92 us
+    dve otpravki                48 us
+    barjery                      0 us (izmereno vyshe)
+    ------------------------------------
+    objasneno                  140 us iz 476
+    NE OBJASNENO               336 us = 11,6 us na kazhdyj iz 29 uzlov
+
+**11,6 us na dispatch protiv 2,99 us, iz kotoryh schitalsja ves nash plan.** I 2,99 byl naklon,
+poluchennyj udaleniem devjati SAMYH DESHJOVYH uzlov - to est predelnaja cena deshjovyh, a ne
+srednjaja. Vyvod "rezat uzly dajot maksimum 0,5%" stojal na etom naklone i nedejstvitelen.
+
+Vnimanie s marshrutizatorom - 559 MB na tokjen. Pri 131 GB/s eto 4,3 ms; izmereno 23,63.
+**19,3 ms na tokjen - 35% - sidjat v etom razryve.**
+
+Instrument, kotoryj ego razdelit: SREZ GRAFA PO UZLAM. Sobirat tot zhe graf vnimanija,
+obrezannyj na uzle K, i chitat vremja ustrojstva. Prirashchenie ot K k K+1 - istinnaja cena uzla K
+vmeste s ego barjerom i otpravkoj. Metki vremeni po uzlam etogo ne dajut: barjer pripisyvaet
+malenkoj operacii sliv bolshoj. Srez ne mozhet oshibitsja - barjer vhodit v to, chto ubrali.
