@@ -2801,3 +2801,24 @@ opredeljaetsja chem-to drugim i rope ego ne kasaetsja.
 Sledujushchij shag - zondy VNUTRI grafa karty, a ne dogadki: sravnit vyhod sloja 0 na karte s ego
 zhe vyhodom na processore. Instrument dlja etogo est - `--gpu-static-check` u ekspertov delaet
 rovno eto dlja svoej poloviny.
+
+### Chto proverено i isklyucheno v poiske oshibki gemma4 na karte
+
+    vetka berjotsja                 STATIC_TRUNC pechataet: gemma_block 1, geom 30, rope ext
+    rope ne pri chjom               zamena multi -> ext ne izmenila chisla; multi s nulevymi
+                                    sekcijami i tak svoditsja k obychnomu
+    kesh promрta uezzhaet na kartu  upload_kv sveryaet razmery POSLOJNO i upal by gromko
+    sloi 0 i 1 na PREFILLE tochny   L2 0,0000% - no eto processornyj put, karta tam ne rabotaet
+
+**Glavnoe ogranichenie diagnostiki, i ono i est sledujushchij shag.** Zondy snimajutsja na
+PREFILLE, a karta rabotaet tolko pri odnom tokene, to est v DEKODE. Poetomu vsjo, chto sejchas
+pokazyvajut zondy, - eto processornyj put. Chtoby uvidet vyhod KARTY, nuzhny zondy na dekodnom
+grafe: sravnit attn_out, ffn_norm_1 i ffn_norm_2 sloja 0 na karte s temi zhe na processore, pri
+odnom i tom zhe vhode.
+
+Zondy s pravilnymi imenami v vetku karty uzhe dobavleny - ostalos zastavit poshagovuju sverku ih
+snimat.
+
+Rashozhdenie nachinaetsja s PERVOGO zhe shaga dekoda (L2 16,5% na pozicii 4), to est ne
+nakaplivaetsja, a est srazu. Eto suzhaet poisk: iskat nado v tom, chto otlichaet dekod ot
+prefilla, a ne v drejfe.
