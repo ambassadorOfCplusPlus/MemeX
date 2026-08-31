@@ -2754,3 +2754,50 @@ podstanovka parametrov. Sdelannaja geometrija dlja nego neobhodima, no nedostato
 
 Polugotovyj postroitel grafa - rovno to, chto dajot molchalivyj nevernyj otvet, poetomu eto
 otdelnyj zahod so svoej proverkoj protiv etalona (--decode-check sveryaet kazhdyj shag).
+
+## Gemma na karte: put sobran i rabotaet ot nachala do konca, no otvet NEVERNYJ
+
+Sdelano i sobrano:
+
+    poslojnaja geometrija            GpuStaticGeom + cfg_.at(il), otkat na skaljary
+    KV-kesh po sloju                 golovy 16/2 po 512 i 16/8 po 256 v odnoj modeli
+    vtoroj postroitel grafa          blok gemma4: norma mezhdu wo i ostatkom, marshrutizator ot
+                                     vyhoda vnimanija cherez svoj ves, vtoraja pre-norma
+    chetyre vyhoda vmesto trjoh      predel vzvedjonnyh chtenij, krug po-prezhnemu odin
+    slot wv neobjazatelnyj           pjat sloev Gemma bez attn_v: V iz SYROJ proekcii K
+    rope_freqs desjatym slotom       v etom fajle ih net, drugie sborki nesut
+    golova ne vygruzhaetsja           748 MiB ne tratim: ejo postroitel golovu na karte ne zovjot
+    on_card = true                   kesh prinadlezhit karte, host zapisi ne perenaceljivaet
+
+Karta berjot vse 30 sloev, 1174,7 MiB, progon prohodit do konca s kodom 0.
+
+**No otvet nevernyj:**
+
+    bez karty:  L2 7,58 / 6,08 / 8,79 / 8,74 / 13,36 / 5,27   5 iz 6 tokenov sovpali
+    s kartoj:   L2 16,55 / 35,34 / 18,39 / 77,60 / 28,44 / 16,05   1 iz 6
+
+### Chetyre defekta po doroge, i vse molchalivye
+
+Kazhdyj iz nih ne padal i ne zhalovalsja, poka ne dohodilo do sledujushchego:
+
+  1. `build_graphs` stroil grafy GOLOVY po nulevomu tenzoru, kogda golova propushchena -
+     narushenie dostupa srazu posle pechati kuch, bez soobshchenija.
+  2. Kontekst vesov byl rasschitan na 11 tenzorov na sloj, a stalo do 16 - 'needed 74464,
+     available 74400'. ggml_new_object vozvrashchaet nol posredi razmeshchenija, a padaet potom
+     i v drugom meste.
+  3. `proto` v GpuStatic::layer objavljal razmer 2*n_embd + n_expert, a chitalos 3*n_embd +
+     n_expert - vid vyhodil za predely istochnika.
+  4. `--decode-check` zval postroitel BEZ karty, tak chto sverka sravnivala put bez karty sam s
+     soboj i davala sovpadenie do chetvjortogo znaka. **Rezultat, kotoryj vygljadit kak uspeh i
+     ne javljaetsja im** - samyj opasnyj iz chetyrjoh.
+
+### Chto izvestno o samoj oshibke
+
+Zamena ggml_rope_multi na ggml_rope_ext (proverennyj postroitel zovjot imenno ext) ne izmenila
+chisla NI NA ZNAK pri svezhem binarnike. Pri nastojashchem izmenenii koda eto nevozmozhno, esli
+vetka ne berjotsja - znachit libo cfg_.gemma_block ne dohodit do modulja, libo rasxozhdenie
+opredeljaetsja chem-to drugim i rope ego ne kasaetsja.
+
+Sledujushchij shag - zondy VNUTRI grafa karty, a ne dogadki: sravnit vyhod sloja 0 na karte s ego
+zhe vyhodom na processore. Instrument dlja etogo est - `--gpu-static-check` u ekspertov delaet
+rovno eto dlja svoej poloviny.
