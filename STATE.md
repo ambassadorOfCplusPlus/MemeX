@@ -2161,3 +2161,26 @@ Iz teh zhe `_psab_*.out`: **frozen 16,41/16,49 (razbros 0,5%) protiv period3 14,
 oba plecha chistye, raznica **+16,3%**. Umolchanie `--resident-period 3` podtverzhdeno kak hudshee
 na dvuh tugih replikah. Periody 16/32/64 po-prezhnemu ne rezultat (razbrosy 12,6% i 5,8%; u 64
 odna replika).
+
+## Umolchanie perioda: 3 -> 32. Reshaetsja ne po tok/s, a po tochnym velichinam
+
+Tri repliki, dva plecha, odna sessija, vperemeshku i vstrechnym porjadkom, progrev otbroshen.
+
+              podkachek/tok   popadanij    tok/s
+    period 3      6,906        71,569%     14,634   (razbros 5,7%)
+    period 32     1,677        71,313%     15,972   (razbros 8,4%)
+                razbros 0,0%  razbros 0,0%
+
+**Skorost u oboih plech grjaznaja - vyshe poroga 4,2%. Reshenie na nej ne stoit.** Ono stoit na
+dvuh velichinah, u kotoryh razbros NULEVOJ: chislo podkachek i dolja popadanij. Period 32 berjot
+tu zhe dolju popadanij (-0,26 punkta) za chetvert podkachek (-5,23 na tokjen).
+
+Po izmerennomu kursu: 5,23 x 1,297 - 0,26 x 0,368 = **+6,68 ms na tokjen**, to est 68,3 -> 61,6 ms
+= 16,23 tok/s. Izmereno 15,972, rashozhdenie 1,6%.
+
+To est shumnaja raznica v skorosti podtverzhdaetsja tochnoj arifmetikoj na tochnyh vhodah - i eto
+sposob poluchit otvet tam, gde sam otvet izmerjaetsja gryazno. Zapisyvat tak vsegda, kogda
+promezhutochnye velichiny chishche konechnoj.
+
+Pobochno: `submit+zabor` podtverzhdjon tretij raz - 0,957 i 0,955 pri razbrosah 4,2 i 4,0%,
+edinstvennye chistye stroki vo vsjom razlozhenii podkachki.
