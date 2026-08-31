@@ -2325,3 +2325,29 @@ isporchennaja replika iz trjoh razdula razbros plecha do 26,9% i chut ne pohoron
 Chinit tak: sravnivat CPU/tok repliki s medianoj plecha i vybrasyvat vsjo, chto othoditsja bolshe
 chem na 30%. CPU/tok - horoshij storozh imenno potomu, chto ot nashih izmenenij on ne dolzhen
 zaviset vovse.
+
+## To zhe skladyvanie u STATIKI: 28,00 -> 22,97 ms, tokjen 17,16 -> 18,85 (+9,8%)
+
+Odna replika, period 32, korrektnost cela (192 iz 192):
+
+                              bylo      stalo
+    zabor na peresechenie    0,109     0,002    ischez
+    ustrojstvo               0,459     0,462    +0,003 - kopija vnutri grafa pochti darom
+    na tokjen               28,00     22,97     -5,03 ms
+    tok/s                   17,16     18,85     **+9,8%**
+
+Etalon v tom zhe progone 9,03 tok/s, to est **2,09 raza** protiv chistogo processornogo puti forka.
+
+**I zdes ekonomija DOSHLA do tokjena celikom**, v otlichie ot ekspertnogo puti, gde te zhe 4,78 ms
+rastvorilis v dzhojn-ozhidanii. Prichina napisana byla ZARANEE: u statiki net vtoroj storony,
+kotoraja mogla by poglotit vyigrysh - processornyj potok stoit na etom puti zablokirovannym,
+potomu chto sloj vypolnjaetsja vnutri ggml_map_custom na tom zhe potoke.
+
+**Obobshchenie, radi kotorogo vsjo eto stoit chitat.** Odna i ta zhe bolezn nashlas v trjoh mestah
+srazu, i vezde ejo prjatal odin i tot zhe schjot: "eto zhe vsego 46 KB, chto tam mozhet stoit".
+Cena kruga obrashchenija k ustrojstvu - 59 us NEZAVISIMO ot chisla bajt. Znachit vezde, gde
+operacija stoit na dva porjadka bolshe svoih bajtov, iskat nado krug, a ne polosu.
+
+Ostavshiesja mesta togo zhe roda stoit iskat po tomu zhe priznaku: podelit izmerennoe vremja
+operacii na ejo bajty i sravnit s polosoj ustrojstva. Vsjo, chto medlennee polosy v desjatki raz,
+- eto krugi.
