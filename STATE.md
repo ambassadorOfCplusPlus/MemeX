@@ -2724,3 +2724,33 @@ kartu s otdachej 1,00. Perenos snimet s processornoj shiny dve treti trafika vme
 sloja i povtorjaet ego na vseh, a u Gemma iz tridcati sloev dvadcat pjat so skolzjashchim oknom,
 golovy 16/2 po 512 cheredujutsja s 16/8 po 256, masshtab vnimanija edinica vmesto 1/sqrt(d).
 Molchalivyj nevernyj otvet zdes huzhe otkaza. Sledujushchaja rabota - razvesti graf statiki po slojam.
+
+## Perenos statiki na Gemma: geometrija sdelana, no delo ne v nej
+
+Sdelano i sobrano:
+
+    GpuStaticGeom i cfg_.at(il)   geometrija na sloj, otkat na skaljary
+    KV-kesh na karte              vydeljaetsja po sloju, a ne odnim razmerom
+    povorot                       osnovanie i tip iz sloja
+    masshtab softmax              iz sloja: u gemma4 edinica, a ne 1/sqrt(hd)
+    maska                         otpravljaetsja pri SMENE, a ne raz za shag (u gemma4 ih dve)
+    rope_freqs                    desjatym slotom, NEOBJAZATELNYM
+
+Otkat na skaljary sdelan tak, chto put qwen3moe ne izmenilsja ni na bajt: vektor geometrii pust -
+rabotajut prezhnie skaljary.
+
+**No zapret ne snjat, i prichina glubzhe, chem geometrija.** U Gemma DRUGOJ BLOK, a ne tolko drugie
+razmery:
+
+  - posle vnimanija stoit `post_attn_norm`, kotorogo u qwen3moe net;
+  - marshrutizator chitaet VYHOD VNIMANIJA cherez otdelnyj ves `ffn_gate_inp_s`, a ne vyhod
+    `ffn_norm`;
+  - dense-polovina i routed-polovina slozheny cherez `ggml_fused_rms_rms_add` s dvumja
+    post-normami.
+
+Graf statiki postroen pod blok qwen3moe: vnimanie -> wo -> ostatok -> ffn_norm -> marshrutizator.
+Znachit perenos - eto VTOROJ POSTROITEL GRAFA, povtorjajushchij chast build_gemma4_step, a ne
+podstanovka parametrov. Sdelannaja geometrija dlja nego neobhodima, no nedostatochna.
+
+Polugotovyj postroitel grafa - rovno to, chto dajot molchalivyj nevernyj otvet, poetomu eto
+otdelnyj zahod so svoej proverkoj protiv etalona (--decode-check sveryaet kazhdyj shag).
