@@ -2822,3 +2822,33 @@ snimat.
 Rashozhdenie nachinaetsja s PERVOGO zhe shaga dekoda (L2 16,5% na pozicii 4), to est ne
 nakaplivaetsja, a est srazu. Eto suzhaet poisk: iskat nado v tom, chto otlichaet dekod ot
 prefilla, a ne v drejfe.
+
+### Zondy na DEKODNOM grafe: oshibka nazvana tochno
+
+Snjatie zondov na dekode (a ne na prefille) - eto i byl nedostajushchij instrument. Sverka ih
+umeet, nado bylo tolko peredat kartu v Generator.
+
+    najdeno i ispravleno: NORMIROVKA V. U gemma4 V normiruetsja po golove BEZ vesa na kazhdom
+    sloe - tenzora v_norm v fajle net, norma bezvesovaja i ona vsjo ravno tam. U qwen3moe ejo net
+    vovse, poetomu v grafe karty ejo i ne bylo. Karta pisala v kesh nenormirovannoe V.
+
+    bylo:  1 tokjen iz 6, L2 16-78%
+    stalo: 3 tokjena iz 6, L2 1,4-11%
+
+**Chto ostajotsja, i ono nazvano chislom:**
+
+                    nash      etalon
+    attn_out-0    rms 7,49  /  6,97    L2  146%
+    ffn_norm_1-0  rms 11,22 /  1,18    L2  953%
+    ffn_norm_2-0  rms 12,12 /  0,31    L2 3963%
+
+Velichina attn_out primerno vernaja, a normirovki dajut NA PORJADOK bolshe vhoda. Normirovka po
+srednekvadratichnomu pri odinakovom vhode dajot na vyhode velichinu porjadka samogo vesa - znachit
+ves na karte primerno vdesjatero bolshe nastojashchego (11,22 protiv 1,18 - otnoshenie 9,5).
+
+**To est v slot popal ne tot tenzor.** Oba puti zovut odnu i tu zhe operaciju
+(`ggml_fused_rms_norm`) s odnim eps, tak chto raznica tolko v vesah.
+
+Sledujushchij shag ne dogadka, a instrument: u modulja est kljuch `verify` - "prochitat kazhdyj
+vygruzhennyj bajt obratno i sravnit s tenzorom modeli, iz kotorogo on vzjat". Imenno on i nazovjot,
+kakoj slot razjehalsja. Sloty 9..12 dobavleny mnoju segodnja, i imenno oni pod podozreniem.
