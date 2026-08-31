@@ -2477,3 +2477,29 @@ schitaet processor, znachit odnim grafom 48 sloev ne sobrat, poka MoE na process
 **Chto neizvestno i merjaetsja sledujushchim.** Iz chego sostojat 310 us. Ranee pol graph_compute
 s zaborom byl izmeren v 59 us - vpjatero menshe. Libo tot zamer byl v drugih uslovijah, libo zdes
 est chto-to eshchjo. Do etogo otveta ljuboj plan po sokrashcheniju peresechenij prezhdevremenen.
+
+### Iz chego 310 mks: krug ozhidanija zabora, i on strukturno neizbezhen po CHISLU
+
+`ggml_vk_compute_forward` (ggml-vulkan.cpp:9768) otpravljaet komandnyj bufer i zhdjot zabor,
+prichjom **zabor tolko u poslednego otpravlenija** - rannie iduт s `vk::Fence{}`, vystrelil i
+zabyl. Eto objasnjaet, pochemu zamer otpravok dal nol: ih dve, a krug ozhidanija odin.
+
+Znachit 310 us - eto odin krug "otpravil -> planirovshchik Windows -> karta poschitala -> signal ->
+host uvidel", i on platitsja za kazhdyj graph_compute nezavisimo ot chisla uzlov v njom.
+
+**Proverka na golove shoditsja:** odin vyzov na tokjen, odin dispatch na 243 MB, vremja 2,049 ms
+pri bajtah na 1,86 - nakladnye 190 us. Tot zhe porjadok.
+
+**Chto eto menjaet v ocenke vsej shemy.** Vnimanie na karte stoit 23,63 ms, iz kotoryh **14,9 -
+krugi ozhidanija**, a samo vychislenie okolo 8,7. Na processore ono stoilo by 25,0. To est karta
+schitaet vnimanie VTROE bystree processora, i my etogo ne vidim tolko potomu, chto 48 raz za
+tokjen zhdjom planirovshchik.
+
+**Ubrat peresechenija nelzja.** Marshrutizator reshaet, kakih ekspertov brat, po vyhodu vnimanija;
+razdelenie "rezidentnye na karte, ostalnye na processore" zavisit ot etogo reshenija. Sinhronizacija
+na kazhdom sloe vstroena v samu shemu, a ne v ejo realizaciju.
+
+**Znachit rychag - cena odnogo kruga, a ne ih chislo.** Napravlenie: ne zhdat zabor cherez drajver,
+a dat karte poslednim dejstviem zapisat flag v pamjat hosta i oprashivat ego - eto ubiraet perehod
+v jadro OS i planirovshchik iz kriticheskogo puti. Cena voprosa pri padenii 310 -> 60 us:
+49 x 250 us = **12,3 ms na tokjen, okolo 24 tok/s**.
