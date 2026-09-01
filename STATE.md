@@ -3341,3 +3341,24 @@ budushchee reshenie o politike.
 I pobochnoe, kotorogo nikto ne iskal: asinhronnoe plecho ustojchivee sinhronnogo pochti vezde
 (tok/s 0,2% protiv 3,6%, sloj 0,1% protiv 2,7%, chtenie 1,5% protiv 12,2%). Snjatie
 blokirujushchego ozhidanija ubralo i vzaimodejstvie s planirovshchikom.
+
+## Gemma na karte VERNA - port zakryt
+
+Progon posle pravki zondov (`bench/gemma_card_probe.ps1`, oba plecha odnim skriptom, odna sessija):
+
+    processornoe plecho: exit 0, 5 iz 6 shagov tot zhe token, hudshij L2 7,8179%
+    plecho na karte:     exit 0, 5 iz 6 shagov tot zhe token, hudshij L2 6,9117%
+
+    razlichnyh znachenij na semejstvo zonda: 207-209 iz 209 strok - shlopyvanija net
+
+Normy vernulis v normu i eto luchshij pokazatel:
+
+                        bylo (artefakt)      stalo            etalon
+    ffn_norm_1-28       rms 5,30764          1,49567          1,48585
+    ffn_norm_2-29       rms 5,95651          0,18869          0,18838
+
+Rashozhdenija po slojam 3-11% - togo zhe porjadka, chto i na processornom pleche, to est obychnoe
+nakoplenie v plavajushchej tochke, a ne oshibka. **Karta blizhe k etalonu, chem processor.**
+
+Vsjo, chto stojalo v STATE pro "odnu lokalizovannuju oshibku vychislenija" v Gemme, opisyvalo
+artefakt zonda. Port zakryt.
