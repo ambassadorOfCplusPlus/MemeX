@@ -3637,3 +3637,40 @@ Glavnyj podozrevaemyj nazvan zaranee: **tip**. U Kvina eksperty IQ4_XS, u Gemmy 
 Sledstvie, esli podtverditsja: kesh ekspertov dlja Gemmy budet korrekten i pri etom NEVYGODEN
 na etom fajle, i vopros perejdjot iz "napisat" v "vzjat druguju kvantovku". Eto izmerimo odnim
 progonom posle togo, kak zakroetsja NaN.
+
+## Prigovor keshu ekspertov Gemmy: delo ne v korrektnosti, a v TIPE
+
+Obnulenie KV karty NaN ne ubralo (`attn_out-1` ostalsja, odinakovo v oboih grafah). No do togo,
+kak idti dalshe, ja poschital to, radi chego vsjo eto delaetsja - i prioritet menjaetsja.
+
+**Rabota na ustrojstve u dvuh modelej pochti odinakova:**
+
+                              Kvin        Gemma
+    popadanij                 71,3%       96,9%
+    ekspertov na sloj u karty  5,7         7,75
+    sloev                      48          30
+    umnozhenij na token       1291 M      1383 M   (1,07x)
+    -----------------------------------------------------
+    vremja ustrojstva/token   22,9 ms     281 ms   (12x)
+
+Ta zhe rabota - v dvenadcat raz medlennee. Bajtovaja ocenka dlja Gemmy: 800 MB iz videopamjati
+pri 131 GB/s = 6 ms; izmereno 281, to est v 47 raz bolshe bajtovogo predela.
+
+**Sledstvie, i ono reshajushchee.** Dazhe kogda NaN zakroetsja, Gemma s keshom ekspertov dast
+okolo 3,5 tok/s protiv nyneshnih 11,42 BEZ nego. Kesh ekspertov na etom fajle **ubytochen
+nezavisimo ot togo, veren on ili net**.
+
+**Edinstvennaja raznica mezhdu modeljami zdes - tip.** U Kvina eksperty IQ4_XS, u Gemmy q4_K
+(UD-Q4_K_XL). Sobstvennaja proverka dvizhka pri postroenii grafa glasit "rezidentnye eksperty
+dolzhny byt IQ4_XS ili Q6_K" - do sih por eto chitalos kak o PODDERZHKE; pohozhe, chto i o skorosti.
+
+Chto delat, po ubyvaniju otdachi:
+  1. Izmerit odin `mul_mat_id` na q4_K protiv IQ4_XS na etom ustrojstve - `op_probe` v
+     `--gpu-experts-selftest` uzhe eto umeet. Odin progon: libo podtverzhdaet tip kak prichinu,
+     libo snimaet ejo, i togda iskat nado v n_embd 2816 protiv 2048 ili v chisle dispatchej.
+  2. Esli tip - perekvantovat eksperty Gemmy v IQ4_XS i pereizmerit. Dvizhok uzhe umeet gruzit
+     v videopamjat tip, otlichnyj ot togo, chto lezhit v RAM.
+  3. NaN `attn_out-1` pri `--resident` na karte - otdelnyj otkrytyj defekt. Rasshcheplenie iz
+     nego isklyucheno izmereniem (bez karty vse 211 zondov finitny), eksperty isklyucheny
+     (plecho bez nih dajot to zhe), tak chto ostajotsja vzaimodejstvie `res_mask` s vhodnym
+     buferom karty. Ne blokiruet punkt 1.
