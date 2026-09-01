@@ -60,9 +60,10 @@ function Invoke-Step {
 # Script-side verdict, not the engine's: read the probe table back and name the FIRST probe
 # whose L2 is not zero. METHODS 68 - the script checks what the arm claims.
 function Show-FirstBad {
-    param([string]$Name)
+    param([string]$Name, [int]$Code = 0)
     $log = Join-Path $outdir "$Name.log"
     if (-not (Test-Path -LiteralPath $log)) { Write-Host "  $Name : NET LOGA"; return }
+    if ($Code -ne 0 -and $Code -ne 2) { Write-Host "  $Name : NE IZMERENO - progon upal (kod $Code)"; return }
     $rows = Select-String -LiteralPath $log -Pattern '^\s+(\S+)\s+\d+,\s+L2\s+([\d.,]+)%' -AllMatches
     if (-not $rows) { Write-Host "  $Name : ZONDOV NET V LOGE - probe ne otrabotal"; return }
     Write-Host ("  $Name : zondov {0}" -f $rows.Count)
@@ -95,9 +96,23 @@ function Show-FirstBad {
 # family, across layers - within one decode step. If a family collapses to one value, the probe
 # is broken whatever its L2 says; if it is distinct, an L2 of 300% would be a real finding.
 function Show-LayerSpread {
-    param([string]$Name)
+    param([string]$Name, [int]$Code = 0)
     $log = Join-Path $outdir "$Name.log"
     if (-not (Test-Path -LiteralPath $log)) { Write-Host "  $Name : NET LOGA"; return }
+    # exit 2 is the engine saying "it ran and the numbers disagree" - a result. Anything else
+    # non-zero is the run not having happened, and there is no verdict to give.
+    if ($Code -ne 0 -and $Code -ne 2) {
+        $why = switch ($Code) {
+            -1073740791 { 'STATUS_STACK_BUFFER_OVERRUN - GGML_ASSERT ili porcha steka' }
+            -1073741819 { 'STATUS_ACCESS_VIOLATION' }
+            -1073741515 { 'STATUS_DLL_NOT_FOUND - ryadom s exe net ggml.dll ili llama.dll' }
+            -1073741511 { 'STATUS_ENTRYPOINT_NOT_FOUND - dll i exe iz raznyh sborok' }
+            default     { 'neizvestnaja prichina' }
+        }
+        Write-Host ("  $Name : NE IZMERENO - progon upal, kod $Code ($why).")
+        Write-Host  "  $Name : stroki zondov nizhe - eto to, chto uspelo napechatatsja do padenija, a NE rezultat."
+        return
+    }
     foreach ($fam in @('attn_out', 'ffn_norm_1', 'ffn_norm_2', 'l_out')) {
         $rows = Select-String -LiteralPath $log -Pattern ("^\s+" + $fam + "-(\d+)\s.*rms ([\d.,]+) / ([\d.,]+)") -AllMatches
         if (-not $rows) { Write-Host ("  {0,-12} : v loge net" -f $fam); continue }
@@ -131,14 +146,14 @@ try {
     $c = Invoke-Step -Name 'cpu' -Exe $exeCpu -StepArgs $common -LimitMin $StepMin
     Write-Host ""
     Write-Host "===== PROCESSORNOE PLECHO (kontrol) ====="
-    Show-FirstBad -Name 'cpu'
-    Show-LayerSpread -Name 'cpu'
+    Show-FirstBad   -Name 'cpu'  -Code $c
+    Show-LayerSpread -Name 'cpu'  -Code $c
 
     $v = Invoke-Step -Name 'card' -Exe $exeVk -StepArgs ($common + @('--gpu-static-layers')) -LimitMin $StepMin
     Write-Host ""
     Write-Host "===== PLECHO NA KARTE ====="
-    Show-FirstBad -Name 'card'
-    Show-LayerSpread -Name 'card'
+    Show-FirstBad   -Name 'card' -Code $v
+    Show-LayerSpread -Name 'card' -Code $v
     Write-Host ""
     Write-Host ("exit: cpu $c, karta $v   (2 = dvizhok sam soobshchil rashozhdenie)")
 }

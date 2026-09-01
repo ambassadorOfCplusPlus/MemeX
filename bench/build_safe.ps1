@@ -165,6 +165,31 @@ function Invoke-Build([string[]]$t, [bool]$c) {
     $out | Select-Object -Last 2 | ForEach-Object { Say ("  " + $_) }
 }
 
+# Before anything else, and before the machine is taken: a five-minute build is too expensive a
+# way to learn that an edit turned an escaped newline inside a C string literal into a real
+# line break. That
+# has happened ten times in this project - every time through a shell heredoc, every time
+# reported by the compiler as "C2001: newline in constant" after the build had already run, and
+# twice in the middle of a measurement window.
+#
+# The check costs milliseconds and takes no lock. It refuses the build rather than warning,
+# because a warning here is a warning nobody reads.
+$srcs = @(
+    'D:/MemeX/src/ik_llama.cpp/examples/memex-fwd/memex-fwd.cpp',
+    'D:/MemeX/src/ik_llama.cpp/examples/memex-fwd/gpu_experts.cpp',
+    'D:/MemeX/src/ik_llama.cpp/examples/memex-fwd/gpu_static.cpp',
+    'D:/MemeX/src/ik_llama.cpp/examples/memex-fwd/resident_set.cpp',
+    'D:/MemeX/src/ik_llama.cpp/ggml/src/ggml-vulkan.cpp'
+) | Where-Object { Test-Path -LiteralPath $_ }
+if ($srcs.Count -gt 0) {
+    $lit = & python 'C:/Users/User11/Desktop/MemeX/bench/check_literals.py' @srcs 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        $lit | ForEach-Object { Say ("  " + $_) }
+        Say 'oborvannye strokovye literaly - sborka ne zapuskaetsja, mashina ne beryotsja'
+        exit 5
+    }
+}
+
 $held = $false
 if (-not $NoLock) {
     Say "berjom mashinu pod sborku"
