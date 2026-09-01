@@ -4320,3 +4320,37 @@ processornaja polovina - 49% tokena protiv 21% u Kvina.
      iz summ.**
   3. XMP na etoj plate uzhe klal PK v cikl perezagruzki. 2666 ili 2933 mogut vstat tam, gde
      3200 ne vstajot, i eto stoit probovat stupenjami.
+
+## MTP / spekuljativnoe dekodirovanie: pochemu dlja MoE eto NE mnozhitel K
+
+Polzovatel skazal, chto Google vypustil oficialnuju golovu-chernovik (MTP) dlja Gemma. Proverit
+ne smog: bjudzhet veb-poiska v sessii ischerpan (200 iz 200). Chto proverjaemo lokalno - v nashem
+`gemma-4-26B-A4B-it-UD-Q4_K_XL.gguf` tenzorov MTP NET (658 tenzorov, ni odnogo mtp/nextn/eh_proj),
+vesa chernovika prishlos by kachat otdelno.
+
+**Glavnoe prepjatstvie u nas uzhe snjato:** `build_step`/`build_gemma4_step`/`build_qwen35_step`
+parametrizovany `n_tokens`, i prefill gonjaet te zhe stroiteli na sotnjah tokenov. Prohod na K
+tokenov - eto sushchestvujushchij put s drugim argumentom, a ne novaja arhitektura.
+
+**No mnozhitel K - eto svojstvo PLOTNOJ modeli.** Ona chitaet vesa odin raz na prohod. Razrezhennaja
+MoE - net: kazhdyj iz K tokenov marshrutiziruetsja v svoi 8 iz 128 ekspertov, i prohod objazan
+prochitat OBEDINENIE. Ekonomija processornoj poloviny ravna rovno perekrytiju naborov u sosednih
+tokenov - ne bolshe.
+
+Stoimost prohoda (Gemma, tekushchie 73,7 ms tokena = karta 35,0 + processor 36,0):
+
+    cena(K) = 35,0 + 36,0 * obedinenie(K) / 8        ms na prohod
+    na prinjatyj token = cena(K) / prinjato(K)
+
+Kartochnaja polovina delitsja na K chestno: golova (784 MB, 6,67 ms) i pol krossinga (10,10 ms iz
+28,34 - eto pol na dispatch, a ne na token) chitajutsja odin raz na prohod. Processornaja - tolko
+na perekrytie. Poetomu ocenka vsej zatei upiraetsja v odno chislo, i eto chislo IZMERIMO DO
+realizacii.
+
+**Zond postavlen** (`MEMEX_MTP_OVERLAP`, memex-fwd.cpp v raschjote progreva rezidentnogo nabora):
+`rsel` uzhe derzhit top-k marshrutizatora dlja kazhdogo tokena prefilla i kazhdogo sloja, tak chto
+perekrytie - chistaja arifmetika po prochitannomu massivu. Nikakoj novoj grafy. Zond pechataet dlja
+K ot 2 do 6 srednee obedinenie, otnoshenie bajt-na-token i potolok uskorenija processornoj poloviny.
+
+Dve ogovorki zond pechataet sam: eto marshrutizacija NASHEGO prompta, a ne sobstvennogo prodolzhenija
+modeli (raznye populjacii, pravilo 87), i eto POTOLOK - dolja prinjatyh chernovikov v nego ne vhodit.
