@@ -3831,3 +3831,45 @@ statika 1175 = 1923 MiB, svobodno 1073 -> **C = 10**, odinnadcatyj ne vlezaet (1
 
 Idjot progon, gde emkost vybiraet sam dvizhok iz svobodnogo bjudzheta i BEZ etalonnogo dekodera
 (`--no-ref`), protiv kontrolja bez ekspertov voobshche.
+
+## Dvizhok teper podbiraet emkost SAM i proverjaet sebja po faktu
+
+Chisla, kotorye eto potrebovali (`--no-ref`, chtoby etalonnyj dekoder ne derzhal svoi 1265 MiB):
+
+    s ekspertami, emkost vybral dvizhok:  capacity 25, popadanij 96,8%,
+                                          job_tok 282,9 ms, cpu_tok 6,8 -> 2,57 tok/s
+    bez ekspertov voobshche:                                            -> 11,54 tok/s
+
+Dvizhok vybral **25 ekspertov na sloj** - eto 2685 MiB poverh 748 golovy i 1175 statiki, to est
+4,6 GB u karty s 3,8. I vydelenie **proshlo**.
+
+**Vot gde byla oshibka, i ona ta zhe, chto i ves den.** Cikl podbora snizhal emkost tolko kogda
+`alloc_weights` PADAL. Na etom drajvere slishkom bolshoe vydelenie ne padaet: ono uspeshno, a
+izlishek molcha podkladyvaetsja sistemnoj pamjatju, kotoraja prodolzhaet nazyvat sebja
+device-local. "Vydelilos" i "pomestilos" - dva raznyh utverzhdenija, a cikl chital pervoe kak
+vtoroe.
+
+Teper: vydelili -> **sprosili u ustrojstva, chto ono sdelalo** -> esli v kuche ne ostalos
+128 MiB pod rabochuju pamjat grafa, osvobodili i snizili. Shag proporcionalen perebor, a ne po
+odnomu: ot 25 do 10 po odnomu - eto pjatnadcat vydelenij po gigabajtu.
+
+### I otdelno, chestno: keshu ekspertov u Gemmy ne pomozhet nikakaja emkost
+
+    bez kesha:            11,54 tok/s
+    C=25 (perepolnenie):   2,57
+    C=6  (vlezaet):        3,37
+
+Pri C=6 nichego ne perepolneno i vsjo ravno vtroe huzhe. Prichina prostaja i schitaetsja: pri
+7,7% popadanij processor po-prezhnemu chitaet 92% ekspertskih bajtov, a sverhu pojavljajutsja
+tridcat dispatchej i tridcat dzhojnov na token. Chtoby kesh platil, nuzhna VYSOKAJA dolja
+popadanij, a dlja nejo nuzhna emkost, kotoraja ne vlezaet posle golovy i statiki.
+
+**Reshenie po bjudzhetu videopamjati dlja Gemmy, po izmerennomu dohodu na megabajt:**
+
+    golova         748 MiB -> +2,32 tok/s  =  0,0031 tok/s na MiB   BERJOM
+    statika sloev 1175 MiB -> +1,54 tok/s  =  0,0013 tok/s na MiB   BERJOM
+    eksperty      ostatok  -> otricatelno                            NE BERJOM
+
+Eto ne "kesh ekspertov ne rabotaet" - on napisan, rasshcheplenie proverено chistym, i na Kvine
+tot zhe kod dajot 71,3% popadanij i platit. Eto "na 4 GB karte posle golovy i statiki dlja nego
+ne ostajotsja emkosti, pri kotoroj on platit".
