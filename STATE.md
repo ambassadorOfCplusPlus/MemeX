@@ -3702,3 +3702,37 @@ zapuska - imenno na etom ja i oshibsja.
 Pravilo, kotoroe iz etogo sleduet i kotorogo u nas ne bylo yavno: **mikroproba objazana
 soobshchat skorost, a ne tolko vremja.** Vremja odnogo malenkogo vyzova est nakladnye rashody
 kanala, i ono odinakovo dlja vsego, chto v etot kanal ne upiraetsja.
+
+### Propusknaja sposobnost po tipam i formam: OBE moi gipotezy oprovergnuty
+
+Ispravlennaja proba (8 slotov, real'nye razmery, skorost ryadom so vremenem):
+
+    forma qwen3moe (2048 x 256):  q4_K 45,7  iq4_xs 39,0  q6_K 41,0  f16 31,3  GMAC/s
+    forma gemma4   (2816 x 704):  q4_K 122,0 iq4_xs 115,6 q6_K 94,5  f16 34,8  GMAC/s
+
+  - **Tip ne vinovat**: q4_K - samyj bystryj iz chetyrjoh na OBEIH formah.
+  - **Forma ne vinovata**: forma gemma4 v 2,7 raza BYSTREE formy qwen3moe.
+
+To est to zhe umnozhenie na tom zhe ustrojstve dolzhno idti na 122 GMAC/s, a dvizhok pokazyvaet
+9,7. Terjaetsja **v puti dispatcha, a ne v jadre**, i v 12,6 raza.
+
+### I tut arifmetika nazvala mesto ran'she, chem gistogramma
+
+U Gemmy shirina eksperta 704, i **704 / 256 = 2,75**. Superblok vseh K-kvantov - 256 elementov,
+i tenzor, u kotorogo ne0 ne kratno bloku, sushchestvovat ne mozhet. Znachit `ffn_down_exps`, u
+kotorogo 704 est dlina svjortki, **fizicheski ne mozhet byt q4_K**.
+
+Gistogramma fajla podtverdila: `q5_1: 29 tenzorov` - po odnomu na sloj iz tridcati. U q5_1 blok
+32, i 704 = 22 x 32. **Tret rabota ekspertov idjot ustarevshim q5_1**, i eto pervyj raz, kogda
+kto-to eto uvidel.
+
+**Pochemu ne videli.** `uploaded_type_name()` vozvrashchaet `up_[0]->type` - odin tip iz trjoh,
+napechatannyj kak "tip v videopamjati". Model, u kotoroj tri ekspertnyh tenzora imejut tri
+raznyh tipa, opisyvalas odnim iz nih. Dobavlen `down_type_name()` i otdelnaja stroka.
+
+Proba dopolnena q5_1 i q8_0 (golova - q8_0), i propuskom kombinacij, kotoryh ne byvaet: esli
+blok tipa ne delit n_embd, pechataetsja "propushchen", a ne molchanie i ne padenie.
+
+Predskazanie do progona: esli q5_1 na etom ustrojstve idjot na edinicy GMAC/s, najdeny i
+prichina 12x, i lechenie - perekvantovat TOLKO down v tip s blokom 32 i bystrym Vulkan-putjom
+(iq4_nl) ili v tip s blokom 256, esli shirinu eksperta mozhno dopolnit.
