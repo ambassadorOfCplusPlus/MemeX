@@ -3974,3 +3974,32 @@ Po tok/s plechi v etom raunde pomenjalis mestami na 0,5%, i eto podtverzhdaet to
 skazano ranshe: raznica vnutri razbrosa, zajavljat ejo kak uskorenie nelzja. Dolgovechnyj
 rezultat asinhronnoj podkachki - ne skorost, a padenie poroga okupaemosti s 3,26 do 2,32 punkta
 popadanij, i on derzhitsja: 0,85 protiv 1,19 ms s razbrosom nizhe 4%.
+
+## Nedostajushchie 1,3 GB nashlis - i eto byla NASHA SOBSTVENNAJA OBVJAZKA
+
+`llama_init_from_model: Vulkan0 compute buffer size = 1265.51 MiB` - etalonnyj kontekst
+sozdavalsja BEZUSLOVNO, i na modeli s vygruzkoj na GPU ego vychislitelnyj bufer lozhitsja na
+kartu: 42% karty plus 1024 MiB zakrepljonnoj hostovoj pamjati. `--no-ref` vyklyuchal tolko
+SVERKU, a ne vydelenie.
+
+Znachit vyvod "Gemme ne hvataet videopamjati pod kesh ekspertov" byl sdelan na karte, tret
+kotoroj zanimalo to, chto v etom rezhime ne rabotaet. Chisla byli verny, objasnenie - net.
+
+**Chto izmenilos posle pravki (kontekst ne sozdajotsja pri --no-ref):**
+
+                              bylo            stalo
+    capacity (avtopodbor)     0 (ne vlezal)   7
+    graph na dispatch         4,7-6,9 ms      0,5006 ms      <- v 10 raz
+    job_tok                   206-282 ms      14,71 ms
+    join_wait_tok             193,7 ms        1,49 ms        <- poloviny PEREKRYVAJUTSJA
+    tok/s s ekspertami        2,57            10,26
+
+**Ekspertnyj put zarabotal po-nastojashchemu.** 0,5 ms na dispatch - eto tot zhe porjadok, chto
+u Kvina (0,349). Perekrytie polovin, o kotorom sprashivali, teper est: zhdjom 1,49 ms iz 14,7.
+
+**No 10,26 vsjo eshchjo nizhe 11,54 bez ekspertov**, i prichina teper izmerima: popadanij 38,6%
+pri C=7. Karta uzhe zanjata statikoj (23,65 ms) i golovoj (6,67), tak chto ona i stala uzkim
+mestom - dobavlenie ekspertov na kartu dobavljaet k TOMU ZHE resursu.
+
+Otsjuda pravilnaja postanovka voprosa o balanse, kotoryj sprashival polzovatel: **chto derzhat
+na karte** - golovu (748 MiB, +26,8%) ili vdvoe bolshij kesh ekspertov. Idjot zamer obmena.
