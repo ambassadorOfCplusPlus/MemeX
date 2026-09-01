@@ -3958,3 +3958,19 @@ chislom: karta dolzhna byt bystree processora NA EKSPERTA. U Kvina 0,063 protiv 
 U Gemmy 1,45 protiv 0,135 - ne platit, i ne iz-za jader, a iz-za pola: 30 dispatchej v token
 stojat svoego vremeni dazhe pri nule ekspertov, i pri 0,6 eksperta na dispatch etot pol est
 vsjo. U Kvina 5,7 eksperta na dispatch, i tot zhe pol razmazan.
+
+## Kvin cel posle vsego segodnjashnego
+
+Kontrolnyj progon 21:43, posle obnulenija keshej, dobavlenija zondov v `build_step`, schjotchikov
+reportera, tretjego sostojanija u VERIFY_AB i adaptivnogo podbora emkosti - vsjo eto obshchij kod:
+
+    async  podkachek/tok 1,67  popadanij 71,3%  tok/s 18,482  podkachka 0,85 ms
+    sync   podkachek/tok 1,66  popadanij 71,3%  tok/s 18,573  podkachka 1,19 ms
+
+Oba plecha ZAPISALIS, znachit proshli vorota korrektnosti (192/192 i bajty 0/48) - inache skript
+vybrosil by ih. Regressii net.
+
+Po tok/s plechi v etom raunde pomenjalis mestami na 0,5%, i eto podtverzhdaet to, chto bylo
+skazano ranshe: raznica vnutri razbrosa, zajavljat ejo kak uskorenie nelzja. Dolgovechnyj
+rezultat asinhronnoj podkachki - ne skorost, a padenie poroga okupaemosti s 3,26 do 2,32 punkta
+popadanij, i on derzhitsja: 0,85 protiv 1,19 ms s razbrosom nizhe 4%.
