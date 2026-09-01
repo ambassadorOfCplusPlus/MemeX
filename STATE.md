@@ -3370,9 +3370,14 @@ Iz pervogo zhe progona posle pravki (`_gsp_karta_1.out`):
     graf dekoda: sloi schitaet KARTA
     STATIC_AB our_tok_s 8.9362 ref_tok_s 7.5316 gen_ms 7161.9 n_gen 64 static 1
 
-**8,94 tok/s na karte protiv 7,53 u etalona.** Prezhnie 5,94 byli processornym chislom - graf
-nikogda ne poluchal `gstat`. Chistyj A/B s dvumja povtorami idjot; eto odin progon i poka NE
-REZULTAT po nashemu zhe pravilu, no porjadok velichiny nazvan.
+**Chistyj A/B, dva povtora, oba plecha nazvali sebja sami:**
+
+    karta        9,10 tok/s (razbros 4,6%, n=2)   "graf dekoda: sloi schitaet KARTA"
+    processor    7,56 tok/s (razbros 1,9%, n=2)   bez --gpu-static-layers
+    etalon       7,53 tok/s
+
+Statika na karte dajot Gemme **+20,4%**, i my na 21% bystree etalona. Prezhnie 5,94 byli
+processornym chislom - graf nikogda ne poluchal `gstat`.
 
 Zametka o discipline, potomu chto ona srabotala: pervaja versija skripta otvergla vse chetyre
 plecha po kodu vyhoda 2 i napechatala **NE IZMERENO** vmesto togo, chtoby vydumat chislo. Kod 2
@@ -3390,3 +3395,27 @@ Pervyj podozrevaemyj nazvan zaranee: u `prompt_2000.txt` **dva BOM podrjad** v n
 
 Eto ne blokiruet zamer skorosti (tok/s ostajotsja tok/s), no eto otkrytyj vopros o tochnosti
 gemma4, i on zapisan zdes, a ne poterjan v tom, chto "skorost izmerena".
+
+### Pochemu u Gemmy 9,1, a ne 18: schjot, a ne dogadka
+
+Vnimanie, marshrutizatory i KV uzhe na karte, tak chto hostovuju polosu edjat tri veshchi:
+
+    golova (slovar 262144 x 2816)              784 MB -> 31,6 ms   28% tokena
+    eksperty (30 x 8 x 3 x 2816 x 704)         803 MB -> 32,4 ms   29%
+    plotnaja polovina FFN (30 x 3 x 2816x2112) 301 MB -> 12,1 ms   11%
+
+**Gemma rabotaet s odnoj optimizaciej iz trjoh.** U Kvina 18,99 tok/s skladyvajutsja iz statiki
+na karte, kesha rezidentnyh ekspertov s 71% popadanij i asinhronnoj podkachki. U Gemmy est tolko
+pervoe, i oba ostalnyh zakryty javnymi otkazami s napisannoj prichinoj:
+
+  - `--resident/--gpu-experts poka tolko dlja qwen3moe` (memex-fwd.cpp:5947): u gemma4 gate i up
+    lezhat v ODNOM tenzore `ffn_gate_up_exps`, i rasshcheplenie trebuet dvuh progonov odnogo
+    tenzora s dvumja spiskami id.
+  - `--gpu-static: poka tolko qwen3moe` dlja GOLOVY (memex-fwd.cpp:6377): "drugie arhitektury
+    strojat golovu svoim putjom (fnorm, softcap), i podmena tam ne proverena". Eto NE nehvatka
+    videopamjati: v kuche 0 zanjato 1292 MiB iz 3227, svobodno okolo 1900 pri nuzhnyh 748.
+
+**Ocenka do 18, i eto raschjot, a ne zamer.** Golova na kartu ubiraet 31,6 ms: 112 -> 80 ms,
+12,5 tok/s. Kesh ekspertov pri popadanijah urovnja Kvina ubiraet eshchjo ~23 ms: 80 -> 57 ms,
+**17-18 tok/s**. Porjadok rabot: snachala golova - ona dajot 28% i ne trogaet politiku; eksperty
+dorozhe, potomu chto nado rasshcheplyat slityj tenzor.
