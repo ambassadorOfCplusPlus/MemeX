@@ -3898,3 +3898,29 @@ ejo i otklyuchal.
 
 Ispravleno: otdelnyj flag "bolshaja device-local kucha najdena". Nol svobodnyh bajt teper
 validnyj otvet, a ne otkaz.
+
+### Cena odnogo eksperta na kazhdoj storone - i pochemu balansirovka ne panaceja
+
+                    ekspertov na karte   vremja karty   na ekspert   processor, na ekspert
+    Kvin                274/token           17,26 ms      0,063 ms         0,132 ms
+    Gemma, C=6           18,4/token         26,64 ms      1,45  ms         0,135 ms
+
+U Kvina karta VDVOE bystree processora na eksperta - poetomu split i platit. U Gemmy karta v
+desjat raz medlennee, i eto NE jadra: 30 dispatchej na 18 ekspertov, to est po 0,6 eksperta na
+dispatch, i postojannaja cena zapuska sjedaet vsjo. U Kvina 48 dispatchej na 274 eksperta -
+5,7 na dispatch, i ta zhe cena razmazyvaetsja.
+
+**Otsjuda uslovie, pri kotorom balansirovka voobshche mozhet pomoch.** U storony karty est POL:
+tridcat dispatchej v token stojat svoego vremeni dazhe pri nule ekspertov. Balansirovka
+raspredeljaet PEREMENNUJU chast; pol ona ne trogaet. Esli pol sopostavim so vsej rabotoj
+processora (u Gemmy processor delaet vse 240 ekspertov za ~32 ms), delit nechego.
+
+Idjot izmerenie pola: C=1 protiv C=8 pri odinakovom vsjom ostalnom. Raznica mezhdu nimi -
+peremennaja cena, ostatok pri C=1 - pol.
+
+Chto delat s rezultatom:
+  - esli pol mal (~5 ms), balansirovka po IZMERENNOMU vremeni (davat karte stolko ekspertov,
+    skolko ona uspevaet za vremja processora) - pravilnyj sledujushchij shag, i dvizhok uzhe
+    merjaet obe poloviny (ms_job i ms_cpu_half), tak chto reguljator est kuda vstavit.
+  - esli pol velik (~20 ms), reshenie drugoe: **men'she dispatchej**, a ne drugoe raspredelenie -
+    naprimer odin dispatch na neskolko sloev srazu.
