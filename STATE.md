@@ -3924,3 +3924,37 @@ Chto delat s rezultatom:
     merjaet obe poloviny (ms_job i ms_cpu_half), tak chto reguljator est kuda vstavit.
   - esli pol velik (~20 ms), reshenie drugoe: **men'she dispatchej**, a ne drugoe raspredelenie -
     naprimer odin dispatch na neskolko sloev srazu.
+
+## ZAKRYTO IZMERENIEM: keshu ekspertov Gemmy na etoj karte NET MESTA
+
+Dazhe BEZ golovy na karte svobodno **0,47 GiB**, iz kotoryh 384 MiB - rezerv pod rabochuju
+pamjat i rabochij stol. Na odnogo rezidentnogo eksperta na sloj nuzhno 30 x 3,58 MB = 107 MB,
+i dvizhok chestno govorit: "zaprosheno 1 rezidentnyh ekspertov na sloj, a v svobodnye 0.47 GiB
+pomeshchaetsja 0".
+
+Znachit balansirovat nechego: rech ne o tom, kak podelit rabotu mezhdu polovinami, a o tom, chto
+odna iz polovin ne mozhet vzjat na sebja nichego.
+
+**Itogovaja konfiguracija Gemmy, po izmerennomu:**
+
+    tolko processor                         7,56 tok/s
+    + statika sloev na karte                9,10   (+20,4%)
+    + golova na karte                      11,54   (+26,8%)   <- luchshee
+    + kesh ekspertov                       nevozmozhen: pamjati net
+    etalon llama.cpp                        7,53
+
+**Chto imenno sdelano i ostajotsja rabotat**: golova gemma4 na karte (odna pravka na tri stroki,
+otkaz byl shire svoej prichiny), sloi na karte s pravilnym `gstat` v dekodnom grafe (do etogo
+karta zapolnjalas, sverjalas, objavljalas i NE ZVALAS), obnulenie vseh KV-keshej, adaptivnyj
+podbor emkosti s proverkoj po faktu.
+
+**Chto napisano, proverено i lezhit do drugogo zheleza**: kesh ekspertov dlja gemma4 - slityj
+`ffn_gate_up_exps` v zagruzchike, GELU v grafe ustrojstva, rasshcheplenie rezidentnoj poloviny
+v `build_gemma4_step`. Rasshcheplenie proverено chistym (211 zondov finitny bez karty). Na karte
+s bolshim obemom videopamjati eto zarabotaet bez edinoj pravki.
+
+**Uslovie, pri kotorom kesh ekspertov voobshche platit** - vyvedeno iz dvuh modelej i zapisano
+chislom: karta dolzhna byt bystree processora NA EKSPERTA. U Kvina 0,063 protiv 0,132 ms - platit.
+U Gemmy 1,45 protiv 0,135 - ne platit, i ne iz-za jader, a iz-za pola: 30 dispatchej v token
+stojat svoego vremeni dazhe pri nule ekspertov, i pri 0,6 eksperta na dispatch etot pol est
+vsjo. U Kvina 5,7 eksperta na dispatch, i tot zhe pol razmazan.
