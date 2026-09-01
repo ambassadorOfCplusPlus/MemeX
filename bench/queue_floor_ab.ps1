@@ -97,9 +97,18 @@ function RunOnce {
     return $res
 }
 
+# --gpu-static-LAYERS in both arms, and the first attempt got this wrong.
+#
+# It used plain --gpu-static, which puts only the HEAD on the card: one crossing per token, and
+# a big matmul at that. The measured wait then came back at 1.88 ms in BOTH arms to within 0.1%,
+# which is not a refutation of anything - the head's own wait has no reason to move when an
+# expert context appears beside it. The floor being tested lives on the LAYER path, where there
+# are 49 crossings a token of 27 nodes each. The script said "NE IZMERENO, plecho nichego ne
+# razdelilo" rather than "no effect", which is the only reason this was caught rather than
+# recorded as a closed line.
 $arms = @(
-    @{ t = 'static'; x = @('--gpu-static');                want = 1 },
-    @{ t = 'st+exp'; x = @('--gpu-static','--gpu-experts'); want = 2 }
+    @{ t = 'sloi';     x = @('--gpu-static-layers');                want = 1 },
+    @{ t = 'sloi+exp'; x = @('--gpu-static-layers','--gpu-experts'); want = 2 }
 )
 $acc = @{}
 foreach ($arm in $arms) { $acc[$arm.t] = @{ wait = @(); submit = @(); gen = @() } }
@@ -143,12 +152,12 @@ foreach ($arm in $arms) {
     Note (Summ "$($arm.t) submit ms"  $acc[$arm.t].submit)
     Note (Summ "$($arm.t) tok/s"      $acc[$arm.t].gen)
 }
-$ws = @($acc['static'].wait); $we = @($acc['st+exp'].wait)
+$ws = @($acc['sloi'].wait); $we = @($acc['sloi+exp'].wait)
 if ($ws.Count -ge 2 -and $we.Count -ge 2) {
     $ms = ($ws | Measure-Object -Average).Average
     $me = ($we | Measure-Object -Average).Average
     $d  = 100.0 * ($me - $ms) / $ms
-    Note ("ctx0 zhdjom: static {0:N4} -> st+exp {1:N4} ms, {2:N1}%" -f $ms, $me, $d)
+    Note ("ctx0 zhdjom: sloi {0:N4} -> sloi+exp {1:N4} ms, {2:N1}%" -f $ms, $me, $d)
     if ($d -lt -5)    { Note 'UPALO: porog zavisit ot zanjatosti ocheredi - gipoteza podtverzhdena, ocenka 6,1 ms/token' }
     elseif ($d -gt 5) { Note 'VYROSLO: eto konkurencija za ochered, a ne porog. Linija zakryta.' }
     else              { Note 'VNUTRI SHUMA: arm nichego ne razdelil. NE IZMERENO, a ne "net effekta".' }

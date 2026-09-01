@@ -3419,3 +3419,24 @@ pervoe, i oba ostalnyh zakryty javnymi otkazami s napisannoj prichinoj:
 12,5 tok/s. Kesh ekspertov pri popadanijah urovnja Kvina ubiraet eshchjo ~23 ms: 80 -> 57 ms,
 **17-18 tok/s**. Porjadok rabot: snachala golova - ona dajot 28% i ne trogaet politiku; eksperty
 dorozhe, potomu chto nado rasshcheplyat slityj tenzor.
+
+## Porog ocheredi: pervoe plecho bylo postroeno nevernо, i skript eto skazal
+
+Gipoteza (iz obzora literatury): porog krugovoj zaderzhki 310 us ne konstanta, a funkcija
+zanjatosti ocheredi - i togda 310 -> 185 us eto 6,1 ms na token, okolo +13%.
+
+Pervyj progon:
+
+    static  ctx0  zhdjom 1,8769 ms (razbros 0,1%, n=2)  tok/s 13,99
+    st+exp  ctx0  zhdjom 1,8756 ms (razbros 0,1%, n=2)  tok/s 14,32
+    -0,1% - VNUTRI SHUMA
+
+**Eto ne oproverzhenie, i skript tak i napisal: "arm nichego ne razdelil, NE IZMERENO".**
+Prichina - moja oshibka v postroenii plecha: ja vzjal `--gpu-static`, a eto TOLKO golova, odno
+peresechenie na token i bolshoj matmul. U golovy net prichiny menjat svojo ozhidanie ot togo, chto
+rjadom pojavilsja ekspertnyj kontekst. Porog zhivjot na SLOJAH, gde peresechenij 49 na token po
+27 uzlov. Ispravleno: oba plecha teper `--gpu-static-layers`.
+
+Zapisyvaetsja imenno tak, potomu chto pri drugoj formulirovke verdikta ("effekta net") linija
+byla by zakryta lozhno - i eto tretij sluchaj za den, kogda tretje sostojanie kanala spaslo
+rezultat, a ne prosto ukrasilo otchjot.
