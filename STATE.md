@@ -4035,3 +4035,45 @@ okazalsja tot, chto derzhal lishnie 1265 MiB. Eto ne mehanizm, eto shum v odezhd
 Napisan `bench/gemma_dense_ab.ps1`: oba plecha v odnom zahvate zamka, poryadok cheredujetsja
 mezhdu raundami, razbros pechataetsja, i skript sam govorit **NE REZULTAT**, esli razbros bolshe
 effekta. Poka on ne otrabotal, chislo 13,36 nikakogo statusa ne imeet.
+
+## Bjudzhet tokena Gemmy, poschitannyj PO FAJLU - i popravka k moej zhe ocenke
+
+Iz gguf, po tipam i razmeram kazhdogo tenzora:
+
+    ffn_up / ffn_gate / ffn_down   30 sht  q8_0   568,7 MB  -> 22,9 ms/token
+    gate_up_exps                   30 sht  q4_K   (8 iz 128 na sloj) 535,4 MB -> 21,6 ms
+    down_exps                      30 sht  q5_1   (8 iz 128 na sloj) 356,9 MB -> 14,4 ms
+    token_embd (golova)             1 sht  q8_0   784,3 MB  -> na karte, 6,67 ms
+    vnimanie (q/k/v/o)             30 sht  q8_0             -> na karte, v sostave 23,65 ms
+
+    processor: 22,9 + 36,0 = 58,9 ms      karta: 30,3 ms      summa 89,2 protiv izmerennyh 86,6
+
+**Popravka k moej ocenke, i oshibka byla moja.** Ja ocenil plotnuju FFN v 301 MB, iskhodja iz
+4,5 bit; ona **q8_0** i vesit 568,7 MB. Agentu ja dal v brife svoju ocenku, i on postroil na nej
+arifmetiku, "podtverdiv" ejo do trjoh znakov - krugovoe podtverzhdenie. Fajl avtoritetnee oboih.
+
+Sledstvie v nashu polzu: perenos plotnoj poloviny na kartu stoit ne ~9,5 ms, a **~19**.
+
+## Chto prinjos poisk (verificirovannoe, s zhelezom i partiej)
+
+  - **Obe processornye poloviny idut na 100-101% ot predela DDR4** (25,09 i 24,88 GB/s pri
+    izmerennyh 24,8). Nikakaja rabota nad jadrami, perepakovkoj ili AVX2 ih ne sdvinet -
+    tolko MENSHE BAJTOV ili drugoe zhelezo. Eto zakryvaet celyj klass idej srazu.
+  - **Golova uzhe pochti optimalna**: 6,67 ms na 784 MB = 117,6 GB/s = 81,7% ot pika karty.
+    Dlja sravnenija, llama.cpp Vulkan q8_0 matvec na Vega 10 dostigal 47% pika. Tam nechego
+    chinit; potolok - 5,45 ms.
+  - **Pereseshenie v 0,79 ms est 560x ot vremeni peredachi**: aktivacija sloja 5,6 KB idjot po
+    PCIe 3.0 x4 za 1,4 us. 27% tokena - eto zaderzhka submit/fence, i ni odin istochnik takogo
+    ne objasnjaet.
+  - **Nash apstrim ik_llama imeet wontfix-otstavanie v 4,4 raza ot mainline llama.cpp** imenno
+    na gemma4 s ekspertami na processore (issue #1765, tot zhe fajl UD-Q4_K_XL). Prefill pri
+    etom v 3,8 raza BYSTREE. A/B protiv mainline - odin chas i mozhet perevernut ves spisok.
+  - **Razmeshchenie plotnoj FFN na GPU - eto to, chto rekomendujut VSE, vklyuchaja dokumentaciju
+    nashego zhe forka** ("GPU: attention, embedding, normalization, shared experts, dense FFN
+    layers; CPU: routed expert tensors"). My delali obratnoe. Edinstvennoe pryamoe izmerenie -
+    llama.cpp PR #26622 (--n-cpu-ffn, merged 27.08.2026): +20% na RTX 4060 Ti i +59% na
+    RTX PRO 6000, oba batch 1. Ne nashe zhelezo i plotnye modeli, no eto pervoklassnyj otdelno
+    izmerennyj rychag, a ne folklor.
+  - **Nikto ne opublikoval izmerenija plotnoj poloviny otdelno dlja GIBRIDNOJ arhitektury**, i
+    nikto ne perekryval vsegda-aktivnuju polovinu s marshrutiziruemoj na batch 1. Eti dve dyry
+    v literature - to, chto my sejchas i delaem.
