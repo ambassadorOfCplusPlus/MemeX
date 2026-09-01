@@ -4129,3 +4129,36 @@ Vulkan-prilozhenija tam bolshe nechego snjat.
      dense). Desjat minut.
   3. **Proverit KAZHDYJ bufer na prinadlezhnost 256 MiB kuche** - precedent 2,67x, i signatura
      ta zhe (nebolshoj BAR na AMD). My proverili, chto kucha pusta, no eto snimok.
+
+## Potolok parallelnosti nazvan chislom: 4,45 ms brutto, i eto FIZICHESKIJ predel
+
+Vnutri sloja porjadok zhjostkij: vnimanie (karta) -> { plotnaja (karta) || eksperty (processor) }
+-> summa. Perekryt mozhno tolko sovmestnuju fazu, a v nej **karta 4,45 ms protiv processora 36,0**.
+Ogranichivaet menshaja: skolko by ni uluchshali mehanizm, sprjatat mozhno tolko 4,45 ms, i
+razrez grafa nadvoe otdajot 1,5-2,4 ms obratno vtoroj podachej. Chistymi ~2,5 ms, +3,5%.
+
+Chtoby sovmestnaja faza vyrosla, karte nuzhno dat chast EKSPERTOV - eto fork/join, on napisan i
+rabotaet, no videopamjati net: 2533 MiB iz 2996 zanjaty golovoj, vnimaniem i plotnoj polovinoj.
+A schitat ekspertov s karty potokom cherez PCIe: 892 MB na token pri 3,94 GB/s = 226 ms protiv
+36 u processora.
+
+**Eto predel linii, a ne nedorabotka.**
+
+## Zato najdeno vshestero bolshee, i ne trebuet parallelnosti voobshche
+
+Plotnaja polovina dala kalibrovku, kotoroj ran'she ne bylo: ona dobavila 5 dispatchej i 0,149 ms,
+dvigaja 19 MB na sloj - **127 GB/s, na predele karty**. Znachit krupnye matmuly na karte
+effektivny, i mozhno posчitat, skolko dolzhno stoit vnimanie:
+
+    4 krupnyh matmula vnimanija (q,k,v,o): 39 MB pri 127 GB/s  = 0,307 ms/sloj
+    izmereno na sloj                                            = 0,796 ms
+    ----------------------------------------------------------------------
+    17 melkih operacij (normy, rope, zapis KV, kq, softmax, kqv) = 0,489 ms/sloj
+                                                                 = 14,7 ms/token
+
+Pochti nichego ne dvigaja po bajtam. Eto 20% tokena i vshestero bolshe vsej linii parallelnosti.
+
+Zapushchena razvjortka `MEMEX_STATIC_TRUNC` po vosmi stadijam - instrument uzhe byl, i v njom zhe
+zapisano, pochemu ne po uzlam: ispolnenie na karte posledovatelno, i metka vremeni melkogo uzla
+vklyuchaet sliv krupnogo pered nim, tak chto logger odnazhdy objavil ROPE samoj dorogoj operaciej
+vnimanija, a ejo udalenie ne izmenilo nichego (pravilo 80). Prirashchenie stadii podделat nelzja.
