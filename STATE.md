@@ -3674,3 +3674,31 @@ Chto delat, po ubyvaniju otdachi:
      nego isklyucheno izmereniem (bez karty vse 211 zondov finitny), eksperty isklyucheny
      (plecho bez nih dajot to zhe), tak chto ostajotsja vzaimodejstvie `res_mask` s vhodnym
      buferom karty. Ne blokiruet punkt 1.
+
+### Popravka: proba tipov merila NE to, i ja uspel soobshchit ejo kak rezultat
+
+Pervyj timing-progon dal:
+
+    f16    Vulkan 0,132 ms      iq4_xs  Vulkan 0,149 ms
+    q6_K   Vulkan 0,091 ms      q4_K    Vulkan 0,092 ms
+
+i ja prochital eto kak "tip oprovergnut, q4_K ne medlennee". **Eto bylo nevernoe chtenie.**
+Proba stojala na n_exp 4, n_ids 4, n_ff 256 - 2,1 M umnozhenij, a eto na etom ustrojstve
+POROG ZAPUSKA, a ne propusknaja sposobnost. Vse chetyre tipa i dolzhny byli lech v 0,09-0,15 ms,
+potomu chto izmerjalis nakladnye rashody dispatcha.
+
+Nastojashchee sravnenie beryotsja iz logov dvuh progonov i ono odnoznachno:
+
+    Kvin   graph 0,349 ms/dispatch   26,9 M umnozhenij   77,0 GMAC/s
+    Gemma  graph 4,736 ms/dispatch   46,1 M umnozhenij    9,7 GMAC/s
+
+Vosmikratnaja raznica v PROPUSKNOJ SPOSOBNOSTI pri raznice v rabote 1,71x.
+
+Proba ispravlena: n_exp 12 i n_ids 8 (to, chto dispatch delaet na samom dele), dve formy -
+qwen3moe (2048 x 256... teper 2048 x 256 -> real'nye 2048) i gemma4 (2816 x 704), i v otchjot
+dobavlena SKOROST v GMAC/s ryadom so vremenem. Vremja bez skorosti nelzja otlichit ot poroga
+zapuska - imenno na etom ja i oshibsja.
+
+Pravilo, kotoroe iz etogo sleduet i kotorogo u nas ne bylo yavno: **mikroproba objazana
+soobshchat skorost, a ne tolko vremja.** Vremja odnogo malenkogo vyzova est nakladnye rashody
+kanala, i ono odinakovo dlja vsego, chto v etot kanal ne upiraetsja.
