@@ -55,7 +55,11 @@ function RunOnce {
     $res = @{ err = '' }
     $code = $proc.ExitCode
     if ($null -eq $code) { $code = -2 }
-    if ($code -ne 0) { $res.err = "kod vyhoda $code"; return $res }
+    # exit 2 is the engine saying "it ran and the numbers disagree" - a RESULT, and for a speed
+    # measurement an acceptable one: the tok/s is still the tok/s. Anything else means the run
+    # did not happen. The divergence is carried out separately so it cannot be lost.
+    if ($code -ne 0 -and $code -ne 2) { $res.err = "kod vyhoda $code"; return $res }
+    $res.code = $code
     $txt = Get-Content -LiteralPath $log -EA SilentlyContinue
     $w = $txt | Select-String -Pattern 'graf dekoda: sloi schitaet (KARTA|processor)' | Select-Object -First 1
     if ($w -and $w.Line -match 'graf dekoda: sloi schitaet (KARTA|processor)') { $res.who = $Matches[1] }
@@ -89,7 +93,9 @@ for ($r = 1; $r -le $Reps; $r++) {
             }
             if (-not $res.ContainsKey('gen')) { Note ("raund ${r} $($arm.t): tok/s ne prochitan - vybrosheno"); continue }
             $acc[$arm.t] += $res.gen
-            Note ("raund {0} {1,-10} schitaet {2,-9} tok/s {3,6:N2}" -f $r, $arm.t, $(if ($res.who) { $res.who } else { '?' }), $res.gen)
+            Note ("raund {0} {1,-10} schitaet {2,-9} tok/s {3,6:N2}{4}" -f $r, $arm.t,
+                  $(if ($res.who) { $res.who } else { '?' }), $res.gen,
+                  $(if ($res.code -eq 2) { '   (dvizhok soobshchil RASHOZHDENIE - skorost godna, tochnost NET)' } else { '' }))
         }
     } finally { Free-Machine; Say "mashina osvobozhdena posle raunda $r" }
 }

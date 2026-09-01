@@ -3362,3 +3362,31 @@ nakoplenie v plavajushchej tochke, a ne oshibka. **Karta blizhe k etalonu, chem 
 
 Vsjo, chto stojalo v STATE pro "odnu lokalizovannuju oshibku vychislenija" v Gemme, opisyvalo
 artefakt zonda. Port zakryt.
+
+## Gemma na karte: skorost izmerena vpervye
+
+Iz pervogo zhe progona posle pravki (`_gsp_karta_1.out`):
+
+    graf dekoda: sloi schitaet KARTA
+    STATIC_AB our_tok_s 8.9362 ref_tok_s 7.5316 gen_ms 7161.9 n_gen 64 static 1
+
+**8,94 tok/s na karte protiv 7,53 u etalona.** Prezhnie 5,94 byli processornym chislom - graf
+nikogda ne poluchal `gstat`. Chistyj A/B s dvumja povtorami idjot; eto odin progon i poka NE
+REZULTAT po nashemu zhe pravilu, no porjadok velichiny nazvan.
+
+Zametka o discipline, potomu chto ona srabotala: pervaja versija skripta otvergla vse chetyre
+plecha po kodu vyhoda 2 i napechatala **NE IZMERENO** vmesto togo, chtoby vydumat chislo. Kod 2
+u etogo dvizhka oznachaet "progon sostojalsja, chisla razoshlis" - dlja zamera SKOROSTI eto
+priemlemo, dlja zamera tochnosti net, i teper skript razlichaet eti dva sluchaja javno.
+
+### Otkrytoe: gemma4 rashoditsja na etom tekste, i --ref-fa ne pomogaet
+
+Na `prompt_2000.txt` (256 tokenov) prefill dajot **L2 344,66%** i drugoj token - i s `--ref-fa`
+tozhe. Na korotkom promte "The capital of France is Paris..." tot zhe binarnik dajot chistyj
+prefill i 5 iz 6 shagov. Znachit delo v tekste ili v ego dline, a ne v arhitekture voobshche.
+
+Pervyj podozrevaemyj nazvan zaranee: u `prompt_2000.txt` **dva BOM podrjad** v nachale
+(vidno v `head -c`), i eto ne obychnyj tekst dlja tokenizatora. Vtoroj - dlina 256 protiv 24.
+
+Eto ne blokiruet zamer skorosti (tok/s ostajotsja tok/s), no eto otkrytyj vopros o tochnosti
+gemma4, i on zapisan zdes, a ne poterjan v tom, chto "skorost izmerena".
