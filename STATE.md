@@ -4077,3 +4077,55 @@ Sledstvie v nashu polzu: perenos plotnoj poloviny na kartu stoit ne ~9,5 ms, a *
   - **Nikto ne opublikoval izmerenija plotnoj poloviny otdelno dlja GIBRIDNOJ arhitektury**, i
     nikto ne perekryval vsegda-aktivnuju polovinu s marshrutiziruemoj na batch 1. Eti dve dyry
     v literature - to, chto my sejchas i delaem.
+
+## PLOTNAJA FFN NA KARTE: +24,0%, i eto samyj krupnyj vyigrysh Gemmy za sessiju
+
+`bench/gemma_dense_ab.ps1`, tri raunda, poryadok plech cheredujetsja, odin zahvat zamka na raund:
+
+    dense_na_karte  13,57 tok/s (razbros  9,3%, n=3)   na karte 2527,0 MiB   sloj 28,34 ms
+    dense_na_cpu    10,94 tok/s (razbros 12,3%, n=3)   na karte 1984,6 MiB   sloj 23,89 ms
+    -------------------------------------------------------------------------------------
+    10,94 -> 13,57 tok/s, +24,0%   (razbros 12,3% MENSHE effekta 24,0% - sravnenie godno)
+
+Raznica v zanjatoj videopamjati 542,4 MiB - eto rovno plotnaja FFN, to est plecho podtverdilo
+sebja chislom DVIZHKA, a ne flagom (pravilo 68).
+
+**Gemma: 13,57 protiv 7,53 u etalona llama.cpp - v 1,80 raza.** Bylo 5,94 (processornoe chislo
+pod strokoj o karte), potom 9,10 (sloi), 11,54 (golova), teper 13,57 (plotnaja FFN).
+
+## Vtoroj poisk: SEDMAJA linija zakryta, i zakryta zhjostko
+
+Vsja ekonomija na storone submit ogranichena **1,5-2,5 ms iz 23,65**, tremja nezavisimymi
+istochnikami: NVIDIA (50-80 us na planirovanie komandnyh spiskov v Windows), llama.cpp PR #14825
+(~80 us na razryv grafa, RTX 3080, batch 1), PR #10499 (0,35 ms prostoja GPU iz 10 ms). 29
+sekonomlennyh peresechenij x 50-80 us = 1,45-2,32 ms.
+
+Zakryty srazu: objedinenie sloev v odin submit, VK_KHR_timeline_semaphore (ggml ih UZHE
+ispolzuet), vkCmdDispatchIndirect (on ubiraet host->device RESHENIJA o razmere dispatcha, a
+nashe peresechenie sushchestvuet radi VYCHISLENIJA na hoste - drugaja zadacha).
+
+**Reshajushchee nabljudenie sdelano iz NASHIH ZHE dvuh chisel.** 21 dispatch -> 37,6 us na
+dispatch; 17 dispatchej -> 18,2 us. Stoimost na dispatch VYSHE tam, gde ih bolshe - fiksirovannye
+nakladnye rashody tak sebja vesti ne mogut. Znachit 0,64 ms eto rabota ustrojstva:
+0,64 ms x 110 GB/s = 70 MB, a ves vnimanija odnogo sloja u Gemmy ~39 MB plus KV.
+**Peresechenie upiraetsja v polosu videopamjati, a ne v zaderzhku.**
+
+I otdelno pro Windows: HAGS na RDNA2 nedostupen (AMD vklyuchila ego tolko s RDNA3), a put
+ozhidanija zabora uzhe samyj bystryj - Microsoft dokumentiruet "polling using a CPU virtual
+address", chto i objasnjaet, pochemu spin i blokirujushchee ozhidanie u nas nerazlichimy. Iz
+Vulkan-prilozhenija tam bolshe nechego snjat.
+
+### Chto ostajotsja iz vtorogo otchjota, po ubyvaniju
+
+  1. **Perekrytie CPU i GPU** - do 23,65 ms, i eto edinstvennaja linija takogo razmera.
+     Nikto ne opublikoval ejo na batch 1: OSDI'26 pryamo pishet "kogda CPU schitaet MoE, GPU
+     prostaivaet, i naoborot", Fiddler ne perekryvaet, TwinPilots proigryvaet llama.cpp na
+     malyh partijah. Edinstvennyj opublikovannyj sposob slomat zavisimost - Ladder-Residual -
+     stoit GSM8K 84,99 -> 10,54 bez pereobuchenija.
+     **U nas est chastnyj sluchaj, gde zavisimosti NET**: plotnaja i marshrutiziruemaja poloviny
+     chitajut odin i tot zhe attn_out i skladyvajutsja (proverено po istochniku gemma4.cpp).
+     Teper, kogda plotnaja na karte, a eksperty na processore, oni mogut idti ODNOVREMENNO.
+  2. **PCIe link state off + CPU min state 100%** - precedent +10,8% tg na batch 1 (R9700,
+     dense). Desjat minut.
+  3. **Proverit KAZHDYJ bufer na prinadlezhnost 256 MiB kuche** - precedent 2,67x, i signatura
+     ta zhe (nebolshoj BAR na AMD). My proverili, chto kucha pusta, no eto snimok.
