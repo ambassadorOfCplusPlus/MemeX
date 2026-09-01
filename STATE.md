@@ -3440,3 +3440,50 @@ rjadom pojavilsja ekspertnyj kontekst. Porog zhivjot na SLOJAH, gde peresechenij
 Zapisyvaetsja imenno tak, potomu chto pri drugoj formulirovke verdikta ("effekta net") linija
 byla by zakryta lozhno - i eto tretij sluchaj za den, kogda tretje sostojanie kanala spaslo
 rezultat, a ne prosto ukrasilo otchjot.
+
+## Golova Gemmy na karte: +25,5%, i predskazanie sbylos
+
+    golova_na_karte   11,42 tok/s (razbros 0,1%, n=2)   golova 748,0 MiB v videopamjati
+    bylo (golova na hoste)  9,10 tok/s
+    predskazanie, zapisannoe do progona: ~11,7
+
+Odna pravka na tri stroki: `head_matmul` vmesto `ggml_mul_mat` v hvoste gemma4, `sc.head` po
+flagu vmesto zhjostkogo `false`, i snjatie otkaza, kotoryj byl shire svoej prichiny. Hvost
+gemma4 - eto `fnorm -> mul_mat -> softcap`, podmena trogaet TOLKO mul_mat: norma schitaetsja do,
+ogranichenie posle, obe na hoste. Proverjat tam bylo nechego s samogo nachala.
+
+**Plecho `--gpu-static-nohead` upalo s narusheniem dostupa** (-1073741819) i eto pravilnyj
+rezultat harnessa, a ne pomeha: bez golovy na karte `head_matmul` vsjo ravno zval `gstat->head()`,
+kotoryj stroit graf nad nulevym vesom. Dobavlen `head_on()` - otdelnyj vopros ot `on()`, potomu
+chto modul mozhet byt podnjat so slojami i BEZ golovy. Perezamer posle sborki.
+
+## Kesh ekspertov dlja Gemmy: blokirovka okazalas ne tam, gde zapisana
+
+Otkaz glasil: "u gemma4 gate i up lezhat v odnom tenzore `ffn_gate_up_exps`, i rasshcheplenie
+trebuet dvuh progonov odnogo tenzora s dvumja spiskami id". Rasshepljat ne nado.
+
+Iz jadra (`ggml.c`, `ggml_compute_forward_mul_mat_id_up_gate`, vetka `src0_2 == NULL`):
+
+    src0_2_cur = src0_1->data + cur_a*nb02;      // GATE  - PERVAJA polovina sreza
+    src0_1_cur = src0_2_cur + nb02/2;            // UP    - vtoraja
+
+To est srez odnogo eksperta - eto `[n_embd, 2*704]`, i obe poloviny **nepreryvny i vyrovneny po
+blokam kvantovanija** (delenie idjot po ne1, a blok kvanta lezhit vdol ne0 = 2816 = 11 x 256).
+Zagruzchiku dostatochno vzjat dve poloviny odnogo sreza - eto dva memcpy, a ne dva progona.
+
+Vtoraja i poslednjaja raznica: aktivacija. `ggml_moe_up_gate(..., GGML_UNARY_OP_GELU)` schitaet
+`gelu(gate) * up`; nash graf ekspertov schitaet `up * silu(gate)` - ta zhe forma, drugaja unarnaja
+operacija.
+
+Chto menjaetsja v kode (faza 1, plumbing):
+  - `PlainSrc` poluchaet `stride` (bajty mezhdu ekspertami v ISTOCHNIKE) otdelno ot `slab`
+    (bajty ETOJ roli) i `sub` (smeshchenie roli vnutri sreza). Dlja ne-slitogo sluchaja
+    stride == slab, sub == 0 - put ne menjaetsja ni na bajt.
+  - `desc()` dlja slitogo: kind 1 (gate) -> sub 0, kind 0 (up) -> sub stride/2, u oboih
+    ne1 = t->ne[1]/2.
+  - `read_plain` chitaet `p.slab` bajt s `t->data + expert*p.stride + p.sub`.
+  - v grafe ustrojstva `ggml_silu` -> `ggml_gelu` po flagu.
+
+Faza 2 - graf: rasshcheplenie routed-poloviny v `build_gemma4_step` (fork/join, summa dvuh
+polovin, `down_scale` cherez src[2] u `mul_multi_add`). Eto bolshaja chast raboty; faza 1
+samodostatochna i proverjaetsja sushchestvujushchej samoproverkoj.
