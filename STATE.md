@@ -3171,3 +3171,17 @@ kak odin paket iz 512 tokenov, tak chto `end_token()` dvigaet schjotchik perioda
 
 I otdelno: **etalonnyj promt nado zamenit ili dopolnit vtorym**. Poka vse skorosti proekta -
 skorosti na samom lёgkom tekste, kakoj u nas est.
+
+### Kuda ushli ostavshiesja 0,545 ms, i chto s nimi delat
+
+Odin zabor - odin paket v poljote. Cikl sliva delaet `batch_begin` srazu za `batch_end`, tak chto
+sosednie pakety vystraivajutsja v ochered na tom zhe zabore: k momentu, kogda otkryvaetsja
+sledujushchij, predydushchij eshchjo letit. Otsjuda i 527 pozdnih oprosov, i 0,545 ms, uplachennye
+vnutri `batch_begin`.
+
+Sledujushchij shag nazvan i ocenen, no NE sdelan: **koltso iz dvuh slotov** - dva zabora, dva pula
+komand, ochered pripisok. `batch_begin` blokiruetsja tolko kogda zanjaty oba. Potolok: te samye
+0,545 x 1,67 = 0,9 ms na token (~1,7%), a na realnom tekste pri 4,26 podkachki - okolo 2,3 ms (~4%).
+
+Pochemu ne sdelano srazu: eto udvoenie poverhnosti parallelizma na puti s dokumentirovannym
+klassom padenij (#25195), i pravilnyj porjadok - snachala zakryt revju togo, chto uzhe rabotaet.

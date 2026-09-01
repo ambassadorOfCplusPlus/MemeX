@@ -84,6 +84,38 @@ function Show-FirstBad {
     }
 }
 
+# THE PASS CONDITION, and it is not the L2 value.
+#
+# The fault this run exists to re-check was a probe reading a buffer the allocator had reused:
+# every one of the thirty layers reported the LAST layer's bytes. The L2 numbers that produced
+# (369%, 4394%) looked like a computation fault and sent the project after a norm kernel.
+#
+# The tell was there the whole time: the same value on two different layers. A quantity that
+# depends on its input MUST differ between layers. So the check is distinctness, per probe
+# family, across layers - within one decode step. If a family collapses to one value, the probe
+# is broken whatever its L2 says; if it is distinct, an L2 of 300% would be a real finding.
+function Show-LayerSpread {
+    param([string]$Name)
+    $log = Join-Path $outdir "$Name.log"
+    if (-not (Test-Path -LiteralPath $log)) { Write-Host "  $Name : NET LOGA"; return }
+    foreach ($fam in @('attn_out', 'ffn_norm_1', 'ffn_norm_2', 'l_out')) {
+        $rows = Select-String -LiteralPath $log -Pattern ("^\s+" + $fam + "-(\d+)\s.*rms ([\d.,]+) / ([\d.,]+)") -AllMatches
+        if (-not $rows) { Write-Host ("  {0,-12} : v loge net" -f $fam); continue }
+        $ours = @{}
+        foreach ($r in $rows) {
+            $v = ($r.Matches[0].Groups[2].Value) -replace ',', '.'
+            if (-not $ours.ContainsKey($v)) { $ours[$v] = 0 }
+            $ours[$v] += 1
+        }
+        $distinct = $ours.Keys.Count
+        $total    = $rows.Count
+        # One value per decode step, shared by every layer, is the signature. With six steps and
+        # thirty layers a healthy family has far more distinct values than steps.
+        $verdict = if ($distinct -le 8) { "PODOZRITELNO - zond mozhet chitat chuzhoj bufer" } else { "raznye po slojam - horosho" }
+        Write-Host ("  {0,-12} : strok {1,4}, razlichnyh znachenij {2,4}  {3}" -f $fam, $total, $distinct, $verdict)
+    }
+}
+
 Write-Host ("lock holder before: " + (Get-LockHolder))
 Write-Host "zhdjom mashinu..."
 if (-not (Take-Machine -Who 'gemma_card' -TimeoutMin $TimeoutMin)) {
@@ -100,11 +132,13 @@ try {
     Write-Host ""
     Write-Host "===== PROCESSORNOE PLECHO (kontrol) ====="
     Show-FirstBad -Name 'cpu'
+    Show-LayerSpread -Name 'cpu'
 
     $v = Invoke-Step -Name 'card' -Exe $exeVk -StepArgs ($common + @('--gpu-static-layers')) -LimitMin $StepMin
     Write-Host ""
     Write-Host "===== PLECHO NA KARTE ====="
     Show-FirstBad -Name 'card'
+    Show-LayerSpread -Name 'card'
     Write-Host ""
     Write-Host ("exit: cpu $c, karta $v   (2 = dvizhok sam soobshchil rashozhdenie)")
 }
