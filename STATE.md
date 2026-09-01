@@ -3568,3 +3568,39 @@ to est "gde-to v tridcati slojah".
 do vsjakogo rasshcheplenija. Idjot kontrolnyj progon s temi zhe zondami i BEZ rasshcheplenija:
 esli `kq-1` tam tozhe NaN, rasshcheplenie nevinovno celikom, a vinovat uzhe zapisannyj defekt
 gemma4 na `prompt_2000.txt`.
+
+## Nastojashchaja prichina: KV-KESH NIKOGDA NE OBNULJALSJA
+
+Lokator, razdeljonnyj na dva otchjota, perevernul kartinu:
+
+    vse 211 zondov RASSHCHEPLENNOGO grafa finitny
+    pervyj nefinitnyj v NERASSHCHEPLENNOM: kq_soft_max_ext-0 (nan)
+
+**Rasshcheplenie chisto. NaN v NERASSHCHEPLENNOM grafe**, i ne v syrom kq, a POSLE softmax'a,
+to est uzhe za maskoj - tam, gde nefinitnogo byt ne mozhet.
+
+**Mehanizm.** `ggml_backend_alloc_ctx_tensors_from_buft` pamjat NE chistit, a dekod chitaet kesh
+po VYROVNENNOJ dline (`pad32(past+1)`), to est objazatelno zahvatyvaet pozicii, kotorye nikto
+ne pisal. Tam lezhit to, chto poslednim derzhala kucha. Esli eto okazalsja bitovyj uzor NaN -
+maska NE spasaet: `NaN + (-INFINITY)` po-prezhnemu NaN, i otravlena vsja stroka softmax'a.
+
+Podpis defekta byla vidna do togo, kak ja ejo prochital: **v odnom grafe NaN est, v identichnom
+drugom net, i mezhdu progonami on peremeshchaetsja.** Eto neinicializirovannaja pamjat, a ne
+arifmetika. Moj pervyj otchjot lokatora nazval `kq-1` - i eto byla LOZHNAJA trevoga togo zhe
+proishozhdenija: syroe kq schitaetsja po vsej dline kesha i musor v njom zakonen, ego ubivaet
+maska. Poetomu lokator teper nazyvaet DVA imeni: pervoe nefinitnoe voobshche i pervoe sredi
+velichin, objazannyh byt konechnymi.
+
+**Eto ne defekt gemma4.** Emu podverzhena ljubaja arhitektura, chitajushchaja vyrovnennuju dlinu,
+i vsegda byla. Prichina, po kotoroj on vyglядit novym, nazvana schjotchikom zondov, dobavlennym
+chasom ranshe: `kq` - odno iz dvenadcati imjon, kotoryh etalon ne vydajot, tak chto ego NI RAZU
+ne sravnivali.
+
+Pravka: `ggml_backend_buffer_clear(buf, 0)` posle vydelenija vo VSEH TRJOH keshah (osnovnoj,
+chernovika, zonnyj). Odin memset na starte.
+
+**Cepochka, kotoroj stoit obratit vnimanie.** Schjotchik nesverennyh zondov -> vidno, chto kq
+nikogda ne sravnivali -> lokator nefinitnogo -> razdelenie na "voobshche" i "objazatelnye" ->
+neobnuljonnyj kesh. Ni odin shag ne byl dogadkoj o prichine; kazhdyj byl instrumentom, kotoryj
+nazyvaet mesto. Tri gipotezy o prichine, kotorye ja vydvinul PARALLELNO (bjudzhet uzlov, obshchij
+schjotchik chankov, parametr limit), okazalis nevernymi vse tri.
