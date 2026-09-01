@@ -4190,3 +4190,50 @@ oba eti chisla dvizhok uzhe merjaet na kazhdom tokene.
 
 Idjot proverka: esli C vyrastet do ~22, a tok/s upadjot - rassuzhdenie verno, i avtopodbor nado
 chinit po vremeni polovin, a ne po svobodnym bajtam.
+
+## Razvjortka stadij sloja: porog peresechenija est 42% schjota karty
+
+Progon `bench/gemma_trunc_sweep.ps1`, devjat stadij, odin zahvat zamka, kazhdaja stadija sama
+nazyvaet sebja strokoj STATIC_TRUNC (pravilo 68).
+
+**Snachala defekt v samom instrumente, potomu chto on menjaet chtenie.** Stadii 1-4 NE vlozheny
+drug v druga: schjot uzlov idjot 1, 12, **9**, 14 - tretja stadija soderzhit MENSHE uzlov, chem
+vtoraja. Otsjuda dva otricatelnyh prirashchenija (-2,51 i -1,43 ms), a otricatelnoj raboty ne
+byvaet. Prichina napisana v samom kode (`case 2: stop = v` tjanet x i v; `case 3: stop = k`
+neset normu i rope tolko dlja k, a para q - sosed), no sledstvie - chto prirashchenija 2->3 i
+3->4 nedejstvitelny - tam ne nazvano. Chitat mozhno tolko monotonnuju chast.
+
+**Glavnoe chislo:**
+
+    stadija 1: ODIN uzel (norma vhoda), 30 peresechenij -> 10,10 ms/token = 0,337 ms/peresechenie
+    polnyj graf, 32 uzla                                -> 24,01 ms/token = 0,800 ms/peresechenie
+
+**Porog peresechenija 0,337 ms - eto 42% vsego schjota karty.** Odin uzel, ne schitajushchij
+nichego, stoit stolko zhe, skolko tret nastojashchej raboty sloja. Tridcat peresechenij po
+0,337 = 10,10 ms chistyh nakladnyh rashodov iz 24,01.
+
+Chto v etom poroge: `set_step`, zapis vhoda (11 KB), odin dispatch, slozhennyj readback (34 KB),
+ozhidanie zabora. Po PCIe eto 45 KB = 11 us; submit po opublikovannym dannym 50-80 us. Ostajotsja
+0,25 ms neob'jasnjonnyh - v 3-4 raza bolshe vsego, chto udaljos nazvat.
+
+**Monotonnaja chast, po ubyvaniju:**
+
+    kq                          3,94 ms
+    o_proj i ostatok            3,08
+    normy gemma4 + marshrutizator 1,92
+    kqv                         1,00
+    softmax                     0,35
+
+**kq - vybros.** On chitaet 1,18 MB klyuchej (288 pozicij x 8 golov x 256 x 2 bajta), chto pri
+127 GB/s stoit 9 us, a izmereno 131 us na sloj. **V 14 raz mimo.** Dlja sravnenija `o_proj`
+idjot rovno po predelu: 103 us izmereno pri 91 raschjotnyh.
+
+### Chto iz etogo sleduet
+
+  - Porog v 10,10 ms atakuetsja tolko MENSHIM CHISLOM PERESECHENIJ, a ih chislo zadano tem, chto
+    processor schitaet ekspertov mezhdu slojami. Slit dva sloja v odno peresechenie nelzja, poka
+    eksperty na processore. Eto svjazyvaet porog s tem zhe ogranicheniem po videopamjati.
+  - kq v 14 raz mimo predela - edinstvennaja operacija, gde raspolozhen javnyj zapas (3,94 ms),
+    i on ne trebuet ni pamjati, ni parallelnosti.
+  - Instrument nado pochinit: stadii 2 i 3 dolzhny byt vlozheny, inache ih prirashchenija vvodjat
+    v zabluzhdenie tak zhe, kak ih otsutstvie.
