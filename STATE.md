@@ -4237,3 +4237,27 @@ idjot rovno po predelu: 103 us izmereno pri 91 raschjotnyh.
     i on ne trebuet ni pamjati, ni parallelnosti.
   - Instrument nado pochinit: stadii 2 i 3 dolzhny byt vlozheny, inache ih prirashchenija vvodjat
     v zabluzhdenie tak zhe, kak ih otsutstvie.
+
+## Kvin s osvobozhdennoj pamjatju: +5,3%, i moj raschjot byl NEVEREN
+
+    qwen_ref    C=12  popadanij 71,3%  karta 16,87  cpu 15,84  ZHDJOM  5,98  ->  18,75 tok/s
+    qwen_noref  C=16  popadanij 81,3%  karta 18,84  cpu 10,78  ZHDJOM 10,91  ->  19,74 tok/s
+
+Ja predskazal, chto bolshe emkosti NAVREDIT, potomu chto karta uzhe medlennee polovinoj. Po
+balansu tak i vyshlo - ozhidanie na dzhojne udvoilos, - **no token vsjo ravno stal koroche**.
+
+**Oshibka v modeli, i ejo stoit nazvat tochno.** Ja schital `total = max(karta, cpu)`, to est
+predpolagal horoshee perekrytie. Dannye govorjat drugoe: karta +1,97, processor -5,06, summa
+-3,09 ms, a token ukorotilsja na 2,6 ms. Znachit **poloviny blizhe k posledovatelnym, chem k
+parallelnym**, i eto zhe govorit samo ozhidanie v 10,91 ms. Model "max" nado zamenit na
+"karta + cpu - perekrytie", gde perekrytie nado MERIT, a ne predpolagat.
+
+To est vyvod "Kvin uzhe v tochke ravnovesija" postroen na neproverennoj posylke i **snimaetsja**.
+Pravilnaja formulirovka: pri nyneshnem (nepolnom) perekrytii vyigryvaet ta konfiguracija, u
+kotoroj menshe SUMMA polovin, a ne maksimum.
+
+**Korrektnost pri C=16 chastichno zakryta**: `VERIFY_AB slots 64 bad 0` - 64 slota svereny s
+modelju pobajtovo, rashozhdenij nol, i na shage 0, i posle generacii. Ne provereno drugoe -
+logity protiv etalona, potomu chto `--no-ref` etalona ne sozdajot i `match` tam 0 iz 192 po
+postroeniju, a ne po oshibke. Idjot otdelnyj progon s etalonom i prinuditelnym C=16: on
+perepolnit pamjat i budet medlennym, zato SVERIT tokeny.
