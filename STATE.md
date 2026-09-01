@@ -2874,3 +2874,75 @@ i temi zhe vhodom i vesom, i sravnit. Esli razojdutsja - eto bekend, a ne nash g
 
 Instrument dlja etogo uzhe est: MEMEX_STATIC_TRUNC=1 stroit graf iz ODNOGO uzla - imenno normy
 vhoda - i sravnit ego vyhod s processornym mozhno tem zhe zondom.
+
+## Kvin: regressija maski zakryta, 192/192
+
+Pravka `step_mask_src_ = nullptr` na VTOROM meste sbrosa (gpu_static.cpp ~1297, ne tolko 374)
+proverena progonom `fold_ab.ps1` 09/01 14:07:
+
+    raund 1 fold  podkachek/tok 1,67  popadanij 71,3%  tok/s 18,08  match 192/192  bajty 0/48
+    raund 1 sep   podkachek/tok 1,68  popadanij 71,3%  tok/s 13,15  match 192/192  bajty 0/48
+
+Do pravki oba plecha davali `SOVPALO 7 iz 192` i cifry vybrasyvalis. Teper 192/192 na oboih.
+Skorost 18,08 protiv 18,55 v proshluju sessiju - vnutri mezhsessionnogo razbrosa (11,6%),
+i plecho `sep` v etom raunde prosело silnee obychnogo (zapis 0,051 vmesto 0,009 ms), tak chto
+sravnivat mezhdu sessijami zdes nechego. Vazhno drugoe: **korrektnost vosstanovlena, i fold
+po-prezhnemu vyigryvaet u sep s bolshim zapasom.**
+
+Novoe chislo iz etogo zhe raunda: chtenie podkachki 0,294 ms = **8,52 GB/s** (bylo 7,37).
+Submit+zabor 0,918 - tretje nezavisimoe podtverzhdenie okolo 0,92-0,95, protiv 0,10 iz
+oshibochnogo razlozhenija.
+
+## ReBAR: vopros zakryt NASHIMI ZHE logami, ehat nikuda ne nado
+
+Verhnij patch iz obzora (llama.cpp #21590 - "buffer allocated host-visible but writes still go
+through staging") na etoj mashine ne daet nichego, i eto vidno bez edinoj stroki koda. Nash
+zapusk uzhe pechataet raskladku po kucham:
+
+    kucha 0  DEVICE_LOCAL                        3824 MiB   bjudzhet 2975 MiB
+    kucha 1  host                               16318 MiB
+    kucha 2  DEVICE_LOCAL HOST_VISIBLE HOST_COHERENT   256 MiB   bjudzhet 199 MiB   zanjato 0,00
+
+    vesa ekspertov, sloi 0..23    688,50 MiB -> kucha 0, zapis hosta = staging+fence
+    vesa ekspertov, sloi 24..47   688,50 MiB -> kucha 0, zapis hosta = staging+fence
+    vhod i spiski identifikatorov   0,01 MiB -> kucha 2 (BAR), zapis hosta = memcpy
+
+**BAR - 256 MiB, ne resizable.** Bufer vesov v 688 MiB v nego ne vlezaet po opredeleniju, poetomu
+ego zapis i idet cherez staging. Fork ik_llama uzhe beret memcpy-vetku, kogda naznachenie
+host-visible (`ggml_vk_buffer_write_2d`, ggml-vulkan.cpp:4887) - upstreamnaja zhaloba k nam ne
+otnositsja voobshche.
+
+**Zato v logе vidno to, chego nikto ne zamechal: kucha 2 zanjata na 0,00 MiB.** 256 MiB
+videopamjati na karte ne ispolzujutsja ni podo chto. Eto ~100 ekspertov po 2,51 MB, ili bolshij
+KV-kesh, ili - i eto interesnee - **posadochnaja ploshchadka dlja podkachki**: zapis tuda est
+memcpy, bez submit i bez zabora, to est bez teh samyh 0,918 ms.
+
+Arifmetika, kotoruju nado proverit izmereniem, a ne prinjat:
+  - odin ekspert 2,51 MB; 199 MiB bjudzheta = ~79 slotov
+  - podkachek 1,66 na token na 48 sloev = 0,035 na sloj na token, za period 32 ~1,1 na sloj -
+    to est odnogo-dvuh svop-slotov na sloj (48-96 slotov) hvataet po samoj chastote podkachki
+  - seichas: chtenie 0,294 + submit/zabor 0,918 = 1,21 ms
+  - cherez BAR: odin memcpy host->BAR po PCIe 3.0 x4; pri 3,94 GB/s eto 0,64 ms
+  - **no zapis v WC/uncached BAR-pamjat asimmetrichna i mozhet byt gorazdo huzhe pikovoj.**
+
+Poetomu pervyj shag - ne perestrojka razmeshchenija, a mikrozamer: skolko realno GB/s dajot
+memcpy v bufer iz kuchi 2. Esli menshe ~2 GB/s, ves hod umiraet na meste.
+
+Vtoroj vyigrysh ot toj zhe kuchi nezavisim ot pervogo i proshche: prosto otdat ejo pod
+rezidentnyh ekspertov. Eto +199 MiB k 2975 MiB bjudzheta, okolo 6,7% k emkosti kesha.
+
+## Chto literatura ZAKRYLA (ne otkryla)
+
+Tri linii proverena i zakryta chislami, chtoby ih ne otkryvali zanovo:
+
+  - **Besposteryannoe entropijnoe kodirovanie vesov na shine.** arXiv:2606.15789 sam merjaet:
+    syroj INT4 dajot 6-10x zapasa nad entropijnym predelom, a **gruppovye formaty (AWQ, SmoothQuant)
+    - tolko 1,1-1,3x**. GGUF k-kvanty - gruppovoj format s poblochnymi masshtabami, to est my v
+    etoj zhe kategorii. Realnyj potolok ~10-30%, a ne 6-10x. Vulkan-dekoder ANS ne okupitsja.
+  - **Sub-ekspertnaja granularnost (FloE i rodstvennye).** Nasha sobstvennaja mera: razrezhennost
+    po blokam 32 - 0,003%, zhadnyj orakul pri 5% oshibki osvobozhdaet 0,03% bajtov eksperta,
+    Zhakkar masok mezhdu tokenami 0,1. FloE merjal Mixtral (8 ekspertov po 14336); u nas 128 po
+    768 - melkozernistyj MoE uzhe potratil tu razrezhennost, kotoruju FloE sobiraet.
+  - **Processornye jadra KTransformers i fastllm.** Programmnoj predvyborki v putjah bez AVX-512
+    net ni odnoj, netemporalnyh zagruzok net, bolshih stranic net, perepakovki net. Format fastllm
+    - 4,5 bita protiv nashih 4,25, to est **na 6% bolshe bajtov na token**.

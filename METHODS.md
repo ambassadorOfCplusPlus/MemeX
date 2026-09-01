@@ -1634,3 +1634,23 @@ MSBuild при сборке зависимой цели обходит прое�
 
 Читать размеры библиотек надо там же, где их читает `build_safe.ps1`, чтобы понятие «какая это
 сборка» было в проекте одно, а не два.
+
+## 84. Bajtovyj bjudzhet nazyvaet potolok TOLKO dlja bajtov, kotorye chitaet processor
+
+Tri raznyh agenta, nezavisimo drug ot druga i bez obshchego konteksta, prishli k odnomu i tomu zhe
+vyvodu: 1,804 GB na token pri polose hosta 24,8 GB/s dajot potolok okolo 13,75 tok/s, znachit
+vsjo vyshe - oshibka izmerenija. My pri etom stoim na 18,08 tok/s s `match 192/192`.
+
+Oshibka ne v arifmetike, a v tom, kakie bajty v nejo vhodjat. 24,8 GB/s - eto **operativnaja
+pamjat**. Bajty, kotorye karta chitaet iz svoej videopamjati na 131 GB/s, k etomu bjudzhetu
+otnoshenija ne imejut vovse: rezidentnyj ekspert, prochitannyj s karty, ne zanimaet ni odnogo
+bajta hostovoj polosy. Potolok 13,75 tok/s - eto potolok konfiguracii, v kotoroj **ves token
+schitaetsja na processore**, i on verno opisyvaet imenno ejo.
+
+Pochemu eto stoit otdelnogo pravila, a ne snoski: k etomu vyvodu prihodjat **refleksivno**, glazami
+po tablice bajtov, i on vsegda zvuchit kak trezvaja popravka k slishkom horoshemu rezultatu -
+samaja ubeditelnaja forma oshibki. On uzhe vozvrashchalsja tri raza i vernjotsja snova.
+
+**Formulirovka dlja proverki lyubogo potolka:** nazvat, cherez KAKOJ kanal idut bajty, prezhde chem
+delit na ego polosu. Odna model daet stolko raznyh potolkov, skolko u nejo kanalov, i vybor
+kanala - eto vybor konfiguracii, a ne svojstvo modeli.
