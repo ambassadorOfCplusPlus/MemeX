@@ -3761,3 +3761,43 @@ a izmereno na ves dispatch 4,736. Znachit esli vinovat down, on dolzhen idti oko
 
 Dobavleny dve formy: DOWN qwen3moe (768 -> 2048) i DOWN gemma4 (704 -> 2816). K-kvanty na
 posledней budут propushcheny s javnoj nadpisju: 704 ne kratno 256.
+
+## Prichina 12x najdena, i eto NE jadra: VIDEOPAMJATI NE HVATAET
+
+Chetvjortaja gipoteza (orientacija DOWN) tozhe oprovergnuta: down u Gemmy idjot na 66,9 GMAC/s,
+a ne na predskazannyh mnoj 3,65. Polnyj schjot odnogo dispatcha po probe:
+
+    up   15,86 M pri 122,2 GMAC/s -> 0,130 ms
+    gate 15,86 M pri 122,2        -> 0,130 ms
+    down 15,86 M pri  66,9        -> 0,237 ms
+    ------------------------------------------
+    ozhidaemo ~0,50 ms, izmereno 4,736 ms
+
+Slozhiv BAJTY vmesto operacij: 26,8 MB vesov na dispatch za 4,736 ms est **5,7 GB/s** - eto
+skorost SHINY, a ne videopamjati.
+
+    kucha 0  DEVICE_LOCAL  razmer 3824,00 MiB   bjudzhet 2995,96 MiB   zanjato 2995,96 MiB
+
+**Zanjato rovno stolko zhe, skolko bjudzhet, do bajta.** Golova 748 + statika 1175 + eksperty
+1289 = 3212 MiB zaprosheno pri 2996 dostupnyh. Drajver vydelil vsjo ravno - podlozhiv
+nedostajushchee sistemnoj pamjatju, imenno tak, kak opisano v nashem sobstvennom kommentarii
+pro `kBarHeapCeiling`: "na sorokovoj dole polosy, prodolzhaja nazyvat ejo device-local".
+131 / 40 = 3,3 GB/s protiv izmerennyh 5,7.
+
+**Tipy, formy i jadra ni pri chjom.** Chetyre gipotezy izmereny i zakryty do togo, kak ja sravnil
+DVA CHISLA V ODNOJ STROKE, kotoraja vsjo eto vremja byla na ekrane.
+
+Postavleno postojannoe preduprezhdenie: kogda kucha zapolnena do bjudzheta, stroka teper govorit
+eto slovami, a ne ostavljaet chitatelju sravnivat dva chisla samomu.
+
+**Chto iz etogo sleduet dlja Gemmy - eto zadacha o BJUDZHETE, a ne ob optimizacii.** Na 4 GB
+karte s bjudzhetom 2996 MiB:
+
+    golova            748 MiB  -> izmereno +25,5% (9,10 -> 11,42 tok/s)
+    statika sloev    1175 MiB  -> izmereno +20,4% (7,56 -> 9,10)
+    eksperty pri C=12 1289 MiB -> ne vlezaet: 748+1175+1289 = 3212 > 2996
+    -------------------------------------------------------------------
+    svobodno pod ekspertov: 2996 - 748 - 1175 = 1073 MiB, to est C okolo 9-10
+
+Idjot proverka: to zhe samoe s golovoj VYKLYUCHENNOJ (osvobozhdaet 748 MiB) i s C=6 pri
+vklyuchennoj golove. Esli delo v perepolnenii, oba plecha dolzhny obvalit 281 ms.
