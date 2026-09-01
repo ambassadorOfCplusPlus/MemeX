@@ -2912,24 +2912,34 @@ ego zapis i idet cherez staging. Fork ik_llama uzhe beret memcpy-vetku, kogda na
 host-visible (`ggml_vk_buffer_write_2d`, ggml-vulkan.cpp:4887) - upstreamnaja zhaloba k nam ne
 otnositsja voobshche.
 
-**Zato v logе vidno to, chego nikto ne zamechal: kucha 2 zanjata na 0,00 MiB.** 256 MiB
-videopamjati na karte ne ispolzujutsja ni podo chto. Eto ~100 ekspertov po 2,51 MB, ili bolshij
-KV-kesh, ili - i eto interesnee - **posadochnaja ploshchadka dlja podkachki**: zapis tuda est
-memcpy, bez submit i bez zabora, to est bez teh samyh 0,918 ms.
+**Kucha 2 zanjata na 0,00 MiB - i eto NE upushchenie, a nashe zhe reshenie.** gpu_experts.cpp:385:
 
-Arifmetika, kotoruju nado proverit izmereniem, a ne prinjat:
-  - odin ekspert 2,51 MB; 199 MiB bjudzheta = ~79 slotov
-  - podkachek 1,66 na token na 48 sloev = 0,035 na sloj na token, za period 32 ~1,1 na sloj -
-    to est odnogo-dvuh svop-slotov na sloj (48-96 slotov) hvataet po samoj chastote podkachki
-  - seichas: chtenie 0,294 + submit/zabor 0,918 = 1,21 ms
-  - cherez BAR: odin memcpy host->BAR po PCIe 3.0 x4; pri 3,94 GB/s eto 0,64 ms
-  - **no zapis v WC/uncached BAR-pamjat asimmetrichna i mozhet byt gorazdo huzhe pikovoj.**
+    ni odin bufer ne dolzhen byt nastolko mal, chtoby pomestitsja v kuchu BAR - tot, chto
+    pomestitsja, budet tuda polozhen, i kak tolko eta kucha zanjata, drajver podkladyvaet pod
+    ostalnoe sistemnuju pamjat na sorokovoj dole polosy, prodolzhaja nazyvat ejo device-local.
 
-Poetomu pervyj shag - ne perestrojka razmeshchenija, a mikrozamer: skolko realno GB/s dajot
-memcpy v bufer iz kuchi 2. Esli menshe ~2 GB/s, ves hod umiraet na meste.
+`kBarHeapCeiling = 256 MiB` stoit nizhnim porogom razmera buferа v oboih moduljah (gpu_experts.cpp
+i gpu_static.cpp), i gruppy sloev narezajutsja tak, chtoby **samaja malenkaja** gruppa ego
+prevyshala. 131/40 = 3,3 GB/s - eto ровно PCIe 3.0 x4, to est drajver AMD pri perepolnenii BAR
+otdaet sistemnuju pamjat vmesto otkaza, i `find_properties` etogo ne vidit.
 
-Vtoroj vyigrysh ot toj zhe kuchi nezavisim ot pervogo i proshche: prosto otdat ejo pod
-rezidentnyh ekspertov. Eto +199 MiB k 2975 MiB bjudzheta, okolo 6,7% k emkosti kesha.
+**Ideja "polozhit rezidentov v pustujushchie 256 MiB" - zakryta.** Zapisana zdes imenno potomu, chto
+vygljadit besplatnoj i budet vozvrashchatsja: v logе vidno pustuju kuchu i ne vidno pochemu.
+
+**Chto pri etom pravilo NE zapreshchaet, i eto edinstvennaja zhivaja shchel.** Opasnost sostoit v
+tom, chto **posledujushchie** vydelenija sjezzhajut v sistemnuju pamjat. Bufer, vydelennyj POSLE
+togo, kak vsjo ostalnoe uzhe leglo v kuchu 0, nikogo za soboj utashchit ne mozhet - ronjat nechego.
+Seichas porog primenjaetsja odinakovo na vseh sajtah vydelenija i etogo razlichija ne delaet.
+
+Eto i est edinstvennyj put k "posadochnoj ploshchadke podkachki v BAR": arena na 48-96 slotov
+(120-241 MB), vydelennaja **poslednej**, v kotoruju podkachka pishetsja memcpy bez submit i bez
+zabora (te samye 0,918 ms iz 1,21). Poka eto ne plan, a gipoteza s dvumja proverkami pered nej:
+
+  1. mikrozamer memcpy host->BAR: skolko realno GB/s. Zapis v WC/uncached pamjat asimmetrichna;
+     nizhe ~2 GB/s hod umiraet na meste (2,51 MB / 2 GB/s = 1,26 ms, huzhe nyneshnih 1,21).
+  2. proverit, chto posle vydelenija areny nichego bolshe ne vydeljaetsja - inache pravilo 385
+     srabatyvaet imenno tak, kak ono i opisano, i my poluchim ves rezidentnyj nabor v sistemnoj
+     pamjati, prodolzhaja chitat "device-local" v logе.
 
 ## Chto literatura ZAKRYLA (ne otkryla)
 
