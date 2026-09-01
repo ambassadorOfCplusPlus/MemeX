@@ -3185,3 +3185,31 @@ komand, ochered pripisok. `batch_begin` blokiruetsja tolko kogda zanjaty oba. Po
 
 Pochemu ne sdelano srazu: eto udvoenie poverhnosti parallelizma na puti s dokumentirovannym
 klassom padenij (#25195), i pravilnyj porjadok - snachala zakryt revju togo, chto uzhe rabotaet.
+
+### Revju asinhronnoj podkachki: shest invariantov chisty, odna zakladka
+
+Nezavisimoe revju (tolko chtenie, bez sborki) proshlo po shesti invariantam, kotorye ja nazval
+zaranee, i po kazhdomu skazalo "proverено i chisto" ili nazvalo defekt - imenno v toj forme,
+kotoruju trebuet pravilo 83. Chisty: odin zabor - odin paket; pul komand ne sbrasyvaetsja pod
+ispolnjajushchimsja buferom (`batch_cmd_pool` otdelen ot `transfer_cmd_pool`, kotoryj
+`ggml_vk_graph_cleanup` sbrasyvaet posle kazhdogo grafa); zakreplennoe koltso ne perezapisyvaetsja
+pod letjashchej kopiej; slot s neprizemlivshejsja zapisju ne chitaetsja kak rezidentnyj; vsjo, chto
+mozhet nabljudat bajty, prohodit cherez zabor; teardown zhdjot.
+
+**Defekt, i on nastojashchij.** `flush_layer` (`gpu_experts.cpp:1224`) rabotaet tolko pri
+`cfg_.deferred == false`, i tam vyzyvajushchij zapuskaet `compute(il)` SRAZU posle vozvrata,
+chitaja te zhe sloty. Podkachka idjot po ocheredi peredachi, dispatch - po ocheredi schjota, i
+mezhdu dvumja submit'ami net ni semafora, ni barjera: edinstvennym, chto ih uporjadochivalo, bylo
+ozhidanie vnutri `batch_end`. Otlozhiv ego, my poluchili by ne pozdnjuju posadku, a shejder,
+chitajushchij nedopisannye vesa - bez padenija i bez oshibki.
+
+Segodnja spit: v boju `deferred = true` (`memex-fwd.cpp:6787`), a samoproverka ne stavit grjaznyh
+slotov vnutri cikla, tak chto `batch_end` tam dohodit bez raboty. Odin flag - i ozhivaet.
+
+Pravka: `flush_layer` na vremja snimaet `promo_async_`, tak chto etot put sohranjaet ozhidanie,
+a otlozhennyj - edinstvennyj, kotoryj realno rabotaet - ostajotsja asinhronnym.
+
+Otdelno otmecheno revju i ne javljaetsja oshibkoj: pri obertyvanii koltca poserediny sliva
+`upload` delaet `batch_end(); batch_begin();`, a `batch_begin` zhdjot - to est srednij sliv
+tiho degradiruet k sinhronnomu. Eto ta zhe ochered na odnom zabore, chto i 0,545 ms vyshe, i
+lechitsja tem zhe koltsom iz dvuh slotov.

@@ -50,8 +50,8 @@ try {
     $env:MOE_TRACE_PROBS = '1'
     # No MOE_TRACE_ACT: the replay consumes only the top-k ids, and the activations are what
     # made the earlier traces half a gigabyte each.
-    Note 'zapis trassy: 512 tokenov prefilla odnim paketom, potom 192 sgenerirovannyh'
-    & $exe -m $MODEL -f $PROMPT -c 1024 -b 512 -ub 512 -n 192 -t 8 -ngl 0 -fa off `
+    Note 'zapis trassy: ves promt odnim dekodom - eto TEKST bencha, a ne ego potok'
+    & $exe -m $MODEL -f $PROMPT -c 4096 -b 4096 -ub 4096 -t 8 -ngl 0 -fa off `
            -no-fmoe -no-fug --seed 1 *> 'D:\MemeX\results\hobbit\run_bench_wp.log'
     Remove-Item Env:MOE_TRACE_OUT, Env:MOE_TRACE_PROBS -EA SilentlyContinue
 
