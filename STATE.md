@@ -4261,3 +4261,36 @@ modelju pobajtovo, rashozhdenij nol, i na shage 0, i posle generacii. Ne provere
 logity protiv etalona, potomu chto `--no-ref` etalona ne sozdajot i `match` tam 0 iz 192 po
 postroeniju, a ne po oshibke. Idjot otdelnyj progon s etalonom i prinuditelnym C=16: on
 perepolnit pamjat i budet medlennym, zato SVERIT tokeny.
+
+## Defekt, vvedjonnyj moej zhe pravkoj: --gpu-static-nohead ne rabotal dlja qwen3moe
+
+Pytajas proverit korrektnost Kvina pri C=16, ja snjal golovu, chtoby osvobodit mesto. Na karte
+stalo 852,8 MiB vmesto 876,8 - raznica **24 MiB pri ozhidaemyh 264**. Golova ostalas.
+
+Prichina: `sc.head = !sopt.nohead` ja postavil VNUTR vetki `if (arch_g4)`, tuda, gde ranshe
+stojalo zhjostkoe `sc.head = false`. Dlja ostalnyh arhitektur flag razbiraetsja i molcha ne
+delaet nichego.
+
+**Eto tot zhe klass defekta, kotoryj my ves den ubirali, i vvedjon on pravkoj ot ego zhe
+sluchaja.** Ispravleno: prisvoenie vyneseno iz vetki.
+
+Zametka na budushchee, kotoraja stoit bolshe samoj pravki: **kogda ubiraesh zhjostkoe znachenie iz
+arhitekturnoj vetki, prover, ne dolzhno li novoe znachenie zhit VYSHE nejo.** Zhjostkoe `false`
+tam stojalo zakonno - ono i bylo pro gemma4; flag - net.
+
+## Poputno: golova Kvina - 264 MiB, a ne 748
+
+748 MiB - eto golova GEMMY (262144 x 2816 q8_0). U Kvina slovar 151936 i tip q6_K, poetomu
+264 MiB. Ja perenjos chislo s odnoj modeli na druguju v rassuzhdenii o tom, skolko osvoboditsja.
+Chisla golov nado brat iz loga toj modeli, o kotoroj rech.
+
+## Korrektnost Kvina pri C=16: zakryta po BAJTAM, ne po tokenam
+
+`VERIFY_AB slots 64 bad 0` - 64 slota svereny s modelju pobajtovo, rashozhdenij nol, i na shage 0,
+i posle generacii. Sverit LOGITY pri C=16 ne udalos: etalonnyj kontekst sam zanimaet tu pamjat,
+kotoraja nuzhna dlja C=16, i tri obhoda (menshij ubatch, koroche promt, snjataja golova) dali
+1,74 -> 1,92 -> 1,77 GiB, to est 12-13 slotov vmesto 16.
+
+Chto ostajotsja neprovereno imenno: chto pri 16 slotah na sloj logity sovpadajut s etalonom.
+Put vychislenija tot zhe, chto pri 12 (proveren 192/192), otlichaetsja tolko chislo slotov, a ono
+zakryto bajtovoj sverkoj. Riska ne vizhu, no i "proverено" skazat nelzja.
