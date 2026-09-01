@@ -3318,3 +3318,26 @@ porozhdajushchej operacii: krome nazvannyh, kazhdyj zond - vyhod nastojashchej o
 hranilishchem. `--gpu-experts-selftest` - samyj sil'nyj kanal v dereve: ego vorota javno
 otkazyvajut vyhodu ustrojstva, bit v bit sovpavshemu s processornym (`med > 0.0`). Rannjaja
 oshibka `--decode-check`, sravnivavshego put bez karty sam s soboj, dejstvitelno ispravlena.
+
+### Asinhronnaja podkachka: itogovye chisla, uzhe s chestnym uchjotom
+
+Povtor posle togo, kak `batch_begin` stal zvat zabor cherez schjotchik:
+
+    async  vsego 0,852 ms (razbros 1,5%)   zabor pozzhe 0,534 (1,2%)   tok/s 19,099
+    sync   vsego 1,200 ms (razbros 6,3%)   submit+zabor 0,895 (4,1%)   tok/s 18,725
+
+    322 blokirujushchih zabora na 322 podkachki - kazhdyj paket upiraetsja v zabor
+    na sledujushchem batch_begin; 524 pozdnih oprosa - otkladyvat bylo chto
+
+**Chestnaja formulirovka.** Otlozhennoe ozhidanie ne ischezlo, ono szhalos: 0,895 -> 0,534 ms,
+minus 40% ot etogo chlena. Podkachka celikom 1,200 -> 0,852 (-29%). Po tok/s +2,0%, i eto vsjo
+eshchjo sravnimo s razbrosom sinhronnogo plecha (do 6,3% na etom progone), tak chto kak vyigrysh
+skorosti na ETOM tekste ono ne zajavljaetsja.
+
+Chto zajavljaetsja: **porog okupaemosti podkachki 1,200/0,368 = 3,26 punkta popadanij padaet do
+0,852/0,368 = 2,32**. Eto ne uskorenie, eto izmenenie kursa, po kotoromu ocenivaetsja ljuboe
+budushchee reshenie o politike.
+
+I pobochnoe, kotorogo nikto ne iskal: asinhronnoe plecho ustojchivee sinhronnogo pochti vezde
+(tok/s 0,2% protiv 3,6%, sloj 0,1% protiv 2,7%, chtenie 1,5% protiv 12,2%). Snjatie
+blokirujushchego ozhidanija ubralo i vzaimodejstvie s planirovshchikom.
