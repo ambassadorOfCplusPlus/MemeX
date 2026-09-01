@@ -3604,3 +3604,36 @@ nikogda ne sravnivali -> lokator nefinitnogo -> razdelenie na "voobshche" i "obj
 neobnuljonnyj kesh. Ni odin shag ne byl dogadkoj o prichine; kazhdyj byl instrumentom, kotoryj
 nazyvaet mesto. Tri gipotezy o prichine, kotorye ja vydvinul PARALLELNO (bjudzhet uzlov, obshchij
 schjotchik chankov, parametr limit), okazalis nevernymi vse tri.
+
+### Tot zhe defekt na storone KARTY, i izoljacija ego nazvala
+
+Posle obnulenija hostovyh keshej NaN pereehal, no ne ischez: `attn_out-1`, i teper **odinakovo
+v OBOIH grafah** - rasshcheplennom i net. Izoljacija dvumja progonami pod odnim zamkom:
+
+    A: karta pod statiku + rasshcheplenie na CPU, BEZ --gpu-experts -> attn_out-1 NaN v oboih
+    B: karta pod statiku, bez rasshcheplenija voobshche -> skan ne zapuskaetsja (net rdec)
+
+Plecho A snimaet podozrenie s ekspertov polnostju: ih tam net. Ostajotsja karta - i u nejo
+**svoj KV-kesh**, kotoryj vydeljaet `GpuStatic` (gpu_static.cpp:863) i tozhe ne chistit. Ta zhe
+oshibka, drugoj allokator. Ispravleno tem zhe `ggml_backend_buffer_clear`.
+
+### Otdelno i vazhno: ekspertnyj put ustrojstva u Gemmy KATASTROFICHESKI medlennyj
+
+Iz togo zhe progona, i eto nado nazvat do togo, kak korrektnost zakroetsja:
+
+    job_tok 286,7 ms   cpu_tok 1,7 ms   hits 98,3%
+
+Pri 98% popadanij processoru pochti nechego delat, i vsjo vremja ushlo v ustrojstvo. Bajtovaja
+ocenka: 8 ekspertov x 3 matricy x 1,98 M parametrov x 30 sloev pri 4,5 bit = 800 MB iz
+videopamjati, chto pri 131 GB/s est **6 ms**. Izmereno 286. Raznica v 47 raz.
+
+Sravnenie s Kvinom na tom zhe dvizhke: `sloj 22,9 ms` na 48 sloev = 0,48 ms na dispatch protiv
+~9,5 ms u Gemmy. Dvadcatikratnaja raznica pri geometrii, otlichajushchejsja v 1,4 raza.
+
+Glavnyj podozrevaemyj nazvan zaranee: **tip**. U Kvina eksperty IQ4_XS, u Gemmy q4_K
+(UD-Q4_K_XL). Sobstvennaja proverka dvizhka pri postroenii grafa ekspertov govorit
+"rezidentnye eksperty dolzhny byt IQ4_XS ili Q6_K" - eto o PODDERZHKE, no vozmozhno i o skorosti.
+
+Sledstvie, esli podtverditsja: kesh ekspertov dlja Gemmy budet korrekten i pri etom NEVYGODEN
+na etom fajle, i vopros perejdjot iz "napisat" v "vzjat druguju kvantovku". Eto izmerimo odnim
+progonom posle togo, kak zakroetsja NaN.
