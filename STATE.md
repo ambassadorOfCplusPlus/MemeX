@@ -3873,3 +3873,28 @@ popadanij, a dlja nejo nuzhna emkost, kotoraja ne vlezaet posle golovy i statiki
 Eto ne "kesh ekspertov ne rabotaet" - on napisan, rasshcheplenie proverено chistym, i na Kvine
 tot zhe kod dajot 71,3% popadanij i platit. Eto "na 4 GB karte posle golovy i statiki dlja nego
 ne ostajotsja emkosti, pri kotoroj on platit".
+
+### Parallelnyj schjot: RABOTAET, i eto izmereno - u Gemmy prosto nechego perekryvat
+
+    Kvin:  cpu_tok 14,55   job_tok 17,26   ZHDJOM  6,56 ms
+    Gemma: cpu_tok 13,82   job_tok 206,72  ZHDJOM 193,74 ms
+
+U Kvina poloviny idut odnovremenno: processor 14,6 i karta 17,3, a zhdjom tolko 6,6 - perekrytie
+pochti polnoe. U Gemmy zhdjom rovno stolko, skolko rabotaet karta, i dvizhok sam eto pechataet:
+"parallelnosti net, eto summa". Mehanizm ispraven; nesopostavimy POLOVINY - karta delaet v
+pjatnadcat raz bolshe raboty, chem processor.
+
+Eto zhe dajot uslovie, pri kotorom fork/join voobshche imeet smysl: **poloviny dolzhny byt
+sravnimy**. Pri 96,8% popadanij na karte okazyvaetsja pochti vsjo, i split prevrashchaetsja v
+posledovatelnoe vypolnenie s nakladnymi rashodami sverhu.
+
+### I eshchjo odna oshibka tret'ego sostojanija - v moej zhe pravke pro tretje sostojanie
+
+Adaptivnyj podbor ne srabotal: emkost ostalas 25, hotja preduprezhdenie o zapolnennoj kuche
+napechatalos tri raza. Prichina - `device_heap_facts` vozvrashchala `false`, kogda `best == 0`,
+to est **"svobodno nol" i "ne smog uznat" byli u nejo odnim otvetom**. Moja proverka chitala
+`false` kak "proverit nelzja, soglashaemsja" - i rovno tot sluchaj, radi kotorogo ona pisalas,
+ejo i otklyuchal.
+
+Ispravleno: otdelnyj flag "bolshaja device-local kucha najdena". Nol svobodnyh bajt teper
+validnyj otvet, a ne otkaz.
