@@ -4430,3 +4430,45 @@ Otdelnyj hod, esli mesta ne hvatit: perekvantovat `token_embd` chernovika v q4_K
 (2) kartochnyj put na K tokenov - `gpu_static.cpp:138` soznatelno postroen pod odin token,
 (3) prijom/otkat s otkatom KV. Etalon dlja sverki est: processornye stroiteli grafov K tokenov
 uzhe umejut, imi idjot prefill.
+
+### IZMERENO VREMENEM: cena prohoda na K tokenov (MEMEX_SPEC_WIDTH, bench/spec_width.ps1)
+
+Zond stroit grafy shiriny 1..6 rjadom s rabochim i gonjaet kazhdyj best-of-5. Vremja ustrojstva ne
+zavisit ot znachenij (pravilo 73), poetomu kormim hvost promta.
+
+**Pervyj zamer byl s primesju, i zond ejo sam pokazal.** Pri n_tokens > 1 kartochnyj put sloev
+otklyuchaetsja SAM (`card = gstat && layers_on() && n_tokens == 1`), tak chto shirina 1 shla s
+kartoj, a shiriny >1 - bez. Otnoshenie meshalo dva effekta. Kljuch -NoCard ubiraet kartu sovsem;
+tolko eti chisla merjat perekrytie i nichego bolshe (vezde "sloi CPU", vezde 1650 uzlov):
+
+    Gemma, chistyj kontrol        Kvin, chistyj kontrol
+    K=1  133,38 ms  1,000          106,53 ms  1,000
+    K=2  155,15     0,582          135,31     0,635
+    K=3  188,07     0,470          157,95     0,494
+    K=4  207,77     0,389          195,52     0,459
+    K=5  243,78     0,366          221,18     0,415
+    K=6  284,76     0,356          246,54     0,386
+
+Prohod na 4 tokena stoit 0,389 ot chetyrjoh odinochnyh - **deshevle, chem predskazyval
+marshrutizator** (0,618). Protivorechija net: granica po obedineniju otnositsja tolko k
+EKSPERTNOMU chlenu, a vnimanie, plotnaja FFN i golova amortiziruyutsja polnostju.
+
+Razlozhenie shoditsja s izvestnym bjudzhetom tokena i eto sverka, a ne podgonka:
+    E(1) = 36,0 (eksperty), E(4) = 36,0 * 19,79/8 = 89,1
+    A(1) = 133,4 - 36,0 = 97,4     A(4) = 207,8 - 89,1 = 118,7
+    karta na K=1 ekonomit 133,4 - 69,8 = 63,6  =>  A_karta(1) = 33,8  ~= izvestnye 35,0 KARTA. OK.
+
+**GLAVNYJ VYVOD, i on obratnyj tomu, chto ja govoril po modeli.** Bez perenosa kartochnogo puti
+na K tokenov MTP delaet HUZHE:
+
+    Gemma bez karty, D=3 chernovika, prijomka 0,72, E[prinjato] = 2,611
+        207,8 / 2,611 = 79,6 ms na token = 12,6 tok/s   protiv nyneshnih 13,57  -- POTERJA
+
+    S perenesjonnym kartochnym putjom (ocenka, karta ekonomit te zhe ~63,6 ms na prohod)
+        (118,7 - 63,6 + 89,1) / 2,611 = 55,2 ms = ~18,1 tok/s  protiv 13,57  -- +33%
+
+To est **perenos gpu_static na K tokenov ne "zhelatelen", a objazatelen**: on i est ves vygryш.
+Ranshe ja ocenival 19,5 po modeli; izmerenie dajot ~18, i eto chislo teper opiraetsja na chasy.
+
+Razbros: povtornyj progon toj zhe konfiguracii dal K=4 178,3 -> 182,7 (2,5%), no K=6 279 -> 217
+(25%). **Shirinu 6 schitat ne izmerennoj**, K<=5 vosproizvodim.
