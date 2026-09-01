@@ -3801,3 +3801,33 @@ karte s bjudzhetom 2996 MiB:
 
 Idjot proverka: to zhe samoe s golovoj VYKLYUCHENNOJ (osvobozhdaet 748 MiB) i s C=6 pri
 vklyuchennoj golove. Esli delo v perepolnenii, oba plecha dolzhny obvalit 281 ms.
+
+### Perepolnenie podtverzhdeno prjamym opytom, i vyplyla vtoraja prichina ego
+
+Plecho: golova VKLYUCHENA, C snizhen s 12 do 6 (eksperty 1289 -> 644 MiB).
+
+    C=12, perepolnenie:  job_tok 281,0 ms   cpu_tok  1,7 ms   graph 4,736 ms/dispatch
+    C=6,  vlezaet:       job_tok  26,6 ms   cpu_tok 52,7 ms   graph 2,608 ms/dispatch
+
+**job_tok upal v 10,5 raza.** Gipoteza o perepolnenii podtverzhdena.
+
+**Vtoraja prichina perepolnenija - sama izmeritelnaja obvjazka.** V logе:
+`llama_init_from_model: Vulkan0 compute buffer size = 1265.51 MiB` - eto ETALONNYJ dekoder,
+kotoryj podnimaetsja tolko iz-za `--ref-fa`. Bolshe gigabajta videopamjati derzhit to, chto v
+boju ne rabotaet. Vse zamery Gemmy s kartoj do sih por delalis pod etim gruzom.
+
+### No kesh ekspertov Gemme vsjo ravno NE PLATIT, i eto vidno iz teh zhe chisel
+
+    bez kesha voobshche (golova + statika):  11,42 tok/s
+    s keshom pri C=6, vsjo vlezaet:          3,37 tok/s   popadanij 7,7%
+
+Prichina ne v perepolnenii: pri C=6 nichego ne perepolneno. Pri 7,7% popadanij processor
+vsjo ravno schitaet 92% ekspertov, a sverhu dobavljajutsja dispatchi i dzhojny. Kesh ekspertov
+okupaetsja tolko pri VYSOKOJ dole popadanij, i eto kolichestvennoe uslovie, a ne kachestvennoe.
+
+Bjudzhet po faktu: odin ekspert Gemmy 3,58 MB (644,47 MiB na 6 x 30 slotov). Golova 748 +
+statika 1175 = 1923 MiB, svobodno 1073 -> **C = 10**, odinnadcatyj ne vlezaet (1181 + 1923 =
+3104 > 2996).
+
+Idjot progon, gde emkost vybiraet sam dvizhok iz svobodnogo bjudzheta i BEZ etalonnogo dekodera
+(`--no-ref`), protiv kontrolja bez ekspertov voobshche.
