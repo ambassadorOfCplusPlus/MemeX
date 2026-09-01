@@ -4385,3 +4385,48 @@ n_tokens == 1 ("Decode only, deliberately"). Processornye stroiteli grafov K tok
 (prefill imi i idjot), tak chto est rabochij etalon dlja sverki - rovno tot mehanizm, kotorym my
 proverjali vsjo ostalnoe. Nuzhno: (1) vesa chernovika (v nashem GGUF ih net), (2) kartochnyj put na
 K tokenov, (3) prijom/otkat s otkatom KV.
+
+### Chernovik skachan i razobran: D:/mtp/MTP/mtp-gemma-4-26B-A4B-it-Q8_0.gguf
+
+Iz `unsloth/gemma-4-26B-A4B-it-GGUF` - togo zhe repozitorija, otkuda nasha model. Arhitektura
+`gemma4-assistant`, 49 tenzorov, 446 MB. Ne dvizhok, a VESA: nash dvizhok ostajotsja nash.
+
+    4 bloka, n_embd 1024, n_ff 8192, okno [T,T,T,F] - povtorjaet risunok Gemmy
+    token_embd  [1024, 262144] q8_0  285,2 MB   <- ETO OSNOVNAJA MASSA
+    bloki       4 x ~35,7 MB          143,0 MB
+    nextn.pre_projection  [5632,1024]   6,1 MB  <- styk so skrytym sostojaniem celi
+    nextn.post_projection [1024,2816]   3,1 MB
+
+**attn_k i attn_v OTSUTSTVUJUT sovsem** (`shared_kv_layers 4`): chernovik chitaet KV-kesh CELI, a
+ne stroit svoj. Poetomu emu i ne nuzhen svoj prefill. U nas KV-kesh zhivjot na karte (gpu_static),
+tak chto styk est.
+
+**`output.weight` TOZHE otsutstvuet**: proekciej na slovar sluzhit tot zhe `token_embd`. Embedding
+chitaet odnu stroku, a logity - vsju tablicu. Znachit na KAZHDYJ chernovoj token ~437 MB:
+iz videopamjati 3,3 ms, iz hostovoj 17,6. **Chernovik objazan byt rezidentnym na karte.**
+
+**Raschjot s prijomkoj 0,72** (chislo iz README unsloth, izmereno na B200 s target UD-Q4_K_M -
+ih mnozhitel x1,62 k nam ne perenositsja, a dolja prijomki perenositsja). Cepochka obryvaetsja na
+pervom otkaze, poetomu E = 1 + summa p^i:
+
+    chernovikov  prohod    prinjato   itog
+        1         96,7 ms    1,72     17,8 tok/s
+        2        116,5       2,24     19,2
+        3        134,0       2,61     19,5   <- plato
+        4        149,5       2,88     19,3
+        5        163,5       3,07     18,8
+
+**~19,5 tok/s protiv nyneshnih 13,57, +44%.** Plato na trjoh chernovikah - dalshe marginalnyj
+chernovik prinositsja rezhe, chem stoit svoih bajtov.
+
+**Krizis mesta i pochemu on mjagche, chem kazhetsja.** 446 MB na karte, gde uzhe 2575 MiB
+(vnimanie+KV) plus plotnaja FFN 542 MiB. Chto-to pridjotsja vyselit. No pri prohode na K tokenov
+lyubaja vyselennaja rezidentnaja vesch chitaetsja raz na PROHOD, a ne na token: plotnaja FFN stoit
+22,9 ms na prohod, to est pri trjoh chernovikah - 8,8 ms na token vmesto 22,9. **Spekuljativka
+sama udeshevljaet svoi sobstvennye vyseleniya**, i eto nado uchest v vybore, chto derzhat.
+Otdelnyj hod, esli mesta ne hvatit: perekvantovat `token_embd` chernovika v q4_K, 285 -> 151 MB.
+
+**Rabota, kotoruju eto trebuet ot nas:** (1) zagruzchik arhitektury `gemma4-assistant`,
+(2) kartochnyj put na K tokenov - `gpu_static.cpp:138` soznatelno postroen pod odin token,
+(3) prijom/otkat s otkatom KV. Etalon dlja sverki est: processornye stroiteli grafov K tokenov
+uzhe umejut, imi idjot prefill.
