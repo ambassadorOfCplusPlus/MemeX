@@ -71,6 +71,21 @@
 #
 # Napisano latinicej: PowerShell zdes chitaet fajl bez metki kak ANSI.
 param(
+    # THE PROMPT IS A PARAMETER NOW, and the default is deliberately the old one.
+    #
+    # prompt_2000.txt is the Project Gutenberg header and the opening of War and Peace, and
+    # it is measured to be the most repetitive text we own: type/token 0.228 against
+    # 0.403-0.685 for the three corpora the expert traces were collected on. On it the engine
+    # sees 71.3% hits and 1.68 promotions per token, while a CLAIRVOYANT fixed set of 12 per
+    # layer reaches only 46-57% on ordinary text. So every speed number this project has
+    # published is a speed on the easiest workload available to it.
+    #
+    # The default stays anyway: changing it would silently break comparability with every
+    # historical number in STATE.md. Pass -Prompt to ADD the honest arm instead:
+    #   -Prompt D:\MemeX\results\specpf\prompt_code1.txt
+    # which is the corpus the traces came from - so the engine and the offline replay would
+    # at last be measuring the same text, which they never have.
+    [string] $Prompt  = 'D:\MemeX\results\prompt_2000.txt',
     [int]    $Reps    = 3,
     [int]    $Ngen    = 192,
     [int]    $Tokens  = 512,
@@ -85,7 +100,7 @@ $ErrorActionPreference = 'Continue'
 $EXE    = 'D:\MemeX\src\ik_llama.cpp\build-vk\bin\Release\llama-memex-fwd.exe'
 $SNAP   = 'D:\MemeX\src\ik_llama.cpp\build-vk\bin\Release\llama-memex-period-snap.exe'
 $MODEL  = 'D:\Qwen3-Coder-30B-A3B-mx1.gguf'
-$PROMPT = 'D:\MemeX\results\prompt_2000.txt'
+$PROMPT = $Prompt
 $LOG    = 'D:\MemeX\results\fold_ab.log'
 
 function Say($m)  { $l = ("`n[{0}] ===== {1}" -f (Get-Date -Format 'HH:mm'), $m); Write-Host $l; Add-Content -LiteralPath $LOG -Value $l -Encoding UTF8 }
