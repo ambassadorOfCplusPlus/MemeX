@@ -4162,3 +4162,31 @@ Zapushchena razvjortka `MEMEX_STATIC_TRUNC` po vosmi stadijam - instrument uzhe 
 zapisano, pochemu ne po uzlam: ispolnenie na karte posledovatelno, i metka vremeni melkogo uzla
 vklyuchaet sliv krupnogo pered nim, tak chto logger odnazhdy objavil ROPE samoj dorogoj operaciej
 vnimanija, a ejo udalenie ne izmenilo nichego (pravilo 80). Prirashchenie stadii podделat nelzja.
+
+## Kvin: plotnaja FFN neprimenima, a bolshe videopamjati emu skoree VREDNO
+
+**Plotnoj poloviny u Kvina net.** `collect()` dlja qwen3moe: `L.up = ffn_up_exps`,
+`L.gate = ffn_gate_exps`, `L.down = ffn_down_exps` - eto sami eksperty. Chisto
+marshrutiziruemyj MoE. Pravka gemma4 zakryta flagom `--gpu-static-dense` i provodkoj tolko dlja
+etoj arhitektury; put Kvina ne tronut, regressii vzjatsja neotkuda.
+
+**A 1265 MiB, osvobozhdennye segodnjashnej pravkoj, kasajutsja oboih** - i dlja Kvina eto, po
+raschjotu, NE vyigrysh. Cena odnogo eksperta po storonam, iz `join_wait_tok 6,56 job_tok 17,26
+cpu_tok 14,55` pri 71,3% popadanij i 384 ekspertah na token:
+
+    karta:      17,26 / (0,713 x 384) = 0,063 ms na eksperta
+    processor:  14,55 / (0,287 x 384) = 0,132 ms na eksperta
+
+Karta vdvoe bystree NA EKSPERTA, no delaet ih v 2,5 raza bolshe - i okazyvaetsja medlennee
+polovinoj (17,26 protiv 14,55). Tochka ravnovesija: 0,063f = 0,132(1-f) -> **f = 67,7%**.
+My na 71,3%, to est **uzhe prakticheski v optimume**, i dobavlenie emkosti sdvinet ego v huduju
+storonu: pri 90% popadanij karta schitala by 21,8 ms protiv 5,1 u processora, maksimum vyros by
+s 17,3 do 21,8.
+
+**Defekt konstrukcii, kotoryj nado zapisat: avtopodbor emkosti berjot MAKSIMUM, kotoryj vlezaet,
+a nuzhen BALANS.** Eto raznye chisla. Dlja Gemmy maksimum byl nedostizhim i vopros ne vstaval;
+dlja Kvina maksimum - uzhe perebor. Pravilnyj kriterij - ravenstvo `ms_job` i `ms_cpu_half`, i
+oba eti chisla dvizhok uzhe merjaet na kazhdom tokene.
+
+Idjot proverka: esli C vyrastet do ~22, a tok/s upadjot - rassuzhdenie verno, i avtopodbor nado
+chinit po vremeni polovin, a ne po svobodnym bajtam.
