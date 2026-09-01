@@ -40,8 +40,13 @@ function RunOnce {
     param([string]$Tag, [string[]]$Extra, [int]$LimitSec)
     $log = Join-Path $OUT "_gsp_$Tag.out"
     $err = "$log.err"
+    # --ref-fa is NOT optional for gemma4. With flash attention off, the fork's own gemma4 V
+    # cache is written through ggml_transpose + a flat ggml_cpy, and gemma4 is the one
+    # architecture that hands that code a 3-D V: store and read disagree and THE REFERENCE is
+    # wrong, not us. Without it this arm reported L2 344.66% and a diverging token, which reads
+    # like an engine fault and is not one.
     $a = @('-m', $MODEL, '-f', $PROMPT, '--tokens', "$Tokens", '--gen', "$Ngen",
-           '-t', "$Threads", '--no-repack') + $Extra
+           '-t', "$Threads", '--no-repack', '--ref-fa') + $Extra
     $cmdline = ($a | ForEach-Object { if ($_ -match '[\s"]') { '"' + ($_ -replace '"','\"') + '"' } else { "$_" } }) -join ' '
     $proc = Start-Process -FilePath $EXE -ArgumentList $cmdline -NoNewWindow -PassThru `
                           -RedirectStandardOutput $log -RedirectStandardError $err

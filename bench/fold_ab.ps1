@@ -268,6 +268,13 @@ try {
                     Note ("raund ${r} $($arm.t): SOVPALO $($res.match) iz $($res.of) - plecho NEVERNOE, cifry vybrosheny")
                     continue
                 }
+                # "slots 0 bad 0" is an absence of measurement, not a pass. The byte check
+                # skips empty slots without counting them, so a run that probed only empty ones
+                # used to certify itself correct through this very gate.
+                if ($res.ContainsKey('vslots') -and $res.vslots -eq 0) {
+                    Note ("raund ${r} $($arm.t): BAJTY NE PROVERJALIS (slots 0) - eto ne uspeh, vybrosheno")
+                    continue
+                }
                 if ($res.ContainsKey('vbad') -and $res.vbad -gt 0) {
                     Note ("raund ${r} $($arm.t): VIDEOPAMJAT RASHODITSJA s modelju v $($res.vbad) slotah iz $($res.vslots) - vybrosheno")
                     continue
