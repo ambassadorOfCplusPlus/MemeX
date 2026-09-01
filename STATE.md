@@ -3088,3 +3088,86 @@ i pri C=29 - no sledujushchij takoj vyvod mozhet zaviset.
 
 Proverka deshjovaja: proigrat tot zhe prompt bench-a (512 tokenov progreva, potom 192) i sverit
 s 71,30%.
+
+## Asinhronnaja podkachka: rabotaet, i vyigrysh menshe, chem pokazalos snachala
+
+`promo_async_ab.ps1`, odin binarnik, odna sessija, pereklyuchatel `MEMEX_PROMO_ASYNC`, plecho
+nazyvaet sebja strokoj `PROMO_ASYNC 0|1` i skript eto sverjaet. Raund 1:
+
+    async  podkachek/tok 1,67  popadanij 71,3%  promo_ms/tok 1,41  CPU/tok 14,82  sloj 22,94
+           tok/s 18,97  match 192/192  bajty 0/48
+           podkachka 0,841 ms = chtenie 0,288 + zapis 0,008 + submit/zabor 0,000 + OSTATOK 0,545
+           zabor: reap 0,015 ms; blokirujushchih 5, pozdnih oprosov 527
+
+    sync   podkachek/tok 1,65  popadanij 71,3%  promo_ms/tok 1,93  CPU/tok 15,78  sloj 23,83
+           tok/s 18,13  match 192/192  bajty 0/48
+           podkachka 1,170 ms = chtenie 0,280 + zapis 0,007 + submit/zabor 0,878 + ostatok 0,005
+           zabor: reap 0,000; blokirujushchih 0, pozdnih oprosov 0
+
+**Chto pravda.** Podkachka 1,170 -> 0,841 ms, tok/s 18,13 -> 18,97 (+4,6%), schjot verny na oboih
+plechah. 527 pozdnih oprosov protiv 0 - otkladyvat bylo chto, mehanizm dejstvitelno rabotaet.
+
+**Chto NE pravda, i eto moja zhe oshibka pribora.** Pervoe chtenie bylo "submit/zabor 0,000, reap
+0,015 - ozhidanie ischezlo". Net: OSTATOK vyros s 0,005 do 0,545. Ozhidanie chastichno PEREEHALO -
+`GpuExperts::batch_begin` zval zabor prjamo u bekenda, mimo schjotchika. Arifmetika shoditsja s
+dvuh storon: 1,170 - 0,841 = 0,329, i 0,878 - 0,545 - 0,015 = 0,318.
+
+    iz 0,878 ms zabora:  ~0,33 ischezli,  ~0,55 platjatsja pozzhe
+
+Pravka: `batch_begin` teper zovjot `GpuExperts::batch_reap(true)`, tak chto vremja popadaet v
+`ms_reap_block`. Povedenie ne menjaetsja, menjaetsja tolko chestnost kolonki. Eto rovno pravilo 83
+i ja narushil ego v tot zhe den, kogda ego zapisal.
+
+**Otkuda +4,6% pri ekonomii 0,33 x 1,67 = 0,55 ms na token.** Ne iz samoj podkachki: token 55,2 ->
+52,7 ms, to est 2,4 ms. Ostalnoe - vtoroj porjadok, i on viden v teh zhe strokah: CPU/tok
+15,78 -> 14,82 i sloj 23,83 -> 22,94. Rabochij potok bolshe ne spit 0,878 ms na podkachku, i
+dispatchi, kotorye ran'she zhdali za etim snom, startujut ran'she.
+
+## Nash etalonnyj tekst NEREPREZENTATIVEN, i eto kasaetsja vseh chisel proekta
+
+Rashozhdenie simuljatora i dvizhka (25 punktov) zakryto, i prichina okazalas ne v simuljatore.
+
+Orakul - LUCHSHIJ vozmozhnyj fiksirovannyj nabor iz 12 na sloj, vybrannyj so znaniem vsego okna:
+
+    orakul pri C=12, okno 192 tokena     srednee    luchshee okno
+      kod                                 46,08%      51,69%
+      anglijskij                          49,17%      57,02%
+      russkij                             56,99%      61,44%
+
+71,3% pri C=12 **nedostizhimy na nashih trassah nikakoj politikoj voobshche** - jasnovidjashchaja
+proigryvaet na desjat punktov. Eto odnim shagom snimaet podozrenie s LFU, okna, perioda, bjudzheta
+i transkripcii: ni odno iz nih ne mozhet objasnit razryv, kotoryj pobezhdaet i potolok.
+
+Moja gipoteza (holodnyj start i okno izmerenija) **oprovergnuta**: progrev 512 tokenov i schjot
+tolko sledujushchih 192 dajot 46,74 / 49,02 / 52,15% protiv 46,55% s holoda - menshe punkta iz 25.
+
+**Prichina - sam tekst.** `fold_ab.ps1:88` ukazyvaet na `D:\MemeX\results\prompt_2000.txt`, a eto
+shapka Project Gutenberg i nachalo "Vojny i mira". Otnoshenie tipov k tokenam **0,228** protiv
+0,403 / 0,516 / 0,685 u trjoh korpusov, na kotoryh sobrany trassy - samyj povtorjajushchijsja iz
+chetyrjoh s bolshim otryvom. Potom dvizhok generiruet 192 tokena, prodolzhaja etu zhe shapku.
+
+Podtverzhdaetsja s drugoj storony politiki, chislom, kotorogo nikto ne iskal: u dvizhka **1,68
+podkachki na token**, u proigryvanija pri C=12 - **4,26**. Potok, kotoryj v 2,5 raza deshevle
+derzhat rezidentnym, - eto to zhe samoe utverzhdenie, chto i hit rate.
+
+**Chto iz etogo sleduet, i eto ne melochь.**
+
+  - **71,3% popadanij i 1,66 podkachki na token - svojstva "Vojny i mira", a ne modeli.** Na
+    obychnom tekste nado zhdat okolo 47% i okolo 4,3 podkachki.
+  - **Kursy obmena poschitany na blagoprijatnoj nagruzke.** 1 punkt = 0,368 ms i porog 3,55 punkta
+    vyvedeny pri 1,66 podkachki na token; pri 4,26 vsja arifmetika okupaemosti drugaja.
+  - **Asinhronnaja podkachka na realnom tekste stoit BOLSHE, chem my tolko chto izmerili**, a ne
+    menshe: ekonomija 0,33 ms platitsja za kazhduju podkachku, a ih budet v 2,5 raza bolshe.
+    Eto edinstvennyj sluchaj, kogda nereprezentativnyj etalon zanizhaet nash rezultat.
+  - **Verdikt po predvyborke ot etogo ne menjaetsja**: on schitalsja na trassah, to est uzhe na
+    realnom tekste, i tam on -10,4 ms.
+
+Chto sdelat: progon tracera na sobstvennoj konfiguracii bencha
+(`-f prompt_2000.txt --tokens 512 --gen 192 --resident-period 32`, MOE_TRACE), chtoby proigryvanie
+i dvizhok nakonec merili odno i to zhe. Predskazanie agenta zapisano do progona: 40-55 razlichnyh
+ekspertov na sloj za 192 tokena protiv 80-92 u nas, i **70-72% pri C=12 s ~1,7 podkachki**.
+Esli vernjotsja 46% - vinovata transkripcija, i podozrevaemyj nazvan zaranee: prefill nabljudaetsja
+kak odin paket iz 512 tokenov, tak chto `end_token()` dvigaet schjotchik perioda odin raz vmesto 512.
+
+I otdelno: **etalonnyj promt nado zamenit ili dopolnit vtorym**. Poka vse skorosti proekta -
+skorosti na samom lёgkom tekste, kakoj u nas est.
