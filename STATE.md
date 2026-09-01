@@ -4003,3 +4003,35 @@ mestom - dobavlenie ekspertov na kartu dobavljaet k TOMU ZHE resursu.
 
 Otsjuda pravilnaja postanovka voprosa o balanse, kotoryj sprashival polzovatel: **chto derzhat
 na karte** - golovu (748 MiB, +26,8%) ili vdvoe bolshij kesh ekspertov. Idjot zamer obmena.
+
+## Plotnaja polovina FFN na kartu - napisana; i moj zamer ejo byl NEGODEN
+
+**Chto eto i pochemu ono luchshe ekspertov.** gemma4 na kazhdom tokene schitaet PLOTNUJU
+feed-forward rjadom s marshrutiziruemoj: 3 x 2816 x 2112 na sloj, tridcat sloev, i vsjo eto
+**q8_0** (proverено po gguf: `ffn_up/gate/down q8_0 [2816, 2112]`). Eto 535 M parametrov =
+**569 MB, chitaemyh iz hostovoj OZU KAZHDYJ token** - 22,9 ms iz 86,6, chetvert tokena.
+
+V otlichie ot eksperta ejo chitajut BEZUSLOVNO, nikakoj marshrutizator ejo ne vybiraet:
+
+    golova        748 MiB -> 31,6 ms chtenija CPU  = 0,042 ms/MiB
+    plotnaja FFN  542 MiB -> 22,9 ms               = 0,042 ms/MiB
+    eksperty C=7  748 MiB -> 12,3 ms (38,6% pop.)  = 0,016 ms/MiB
+
+Realizacija: dense schitaetsja na karte i kladjotsja V TOT ZHE slot vyhoda, gde ranshe byl ego
+VHOD (`xf`). Razmer i razmetka ne menjajutsja - `[ffn_inp, <xf ili dense>, xm, logity]` - host
+prosto perestajot ego schitat. Ne cherez `ggml_fused_up_gate`: u nego net Vulkan-realizacii, tak
+chto na karte eto tri mul_mat plus gelu i mul.
+
+**A vot zamer byl negoden, i eto moja oshibka metoda.** Ja zapustil po odnomu progonu na plecho:
+
+    dense na karte  13,36 tok/s
+    kontrol          7,58 tok/s
+
+i tot zhe kontrol na ranee identichnyh progonah daval **10,51 i 11,54**. Razbros 52% na
+neizmenjonnoj konfiguracii ne mozhet izmerit effekt v 15%. Huzhe togo: dva kontrolja, otlichavshiesja
+TOLKO tem, vydeljalsja li neispolzuemyj etalonnyj kontekst, dali 7,58 i 11,54 - prichem BYSTREE
+okazalsja tot, chto derzhal lishnie 1265 MiB. Eto ne mehanizm, eto shum v odezhde mehanizma.
+
+Napisan `bench/gemma_dense_ab.ps1`: oba plecha v odnom zahvate zamka, poryadok cheredujetsja
+mezhdu raundami, razbros pechataetsja, i skript sam govorit **NE REZULTAT**, esli razbros bolshe
+effekta. Poka on ne otrabotal, chislo 13,36 nikakogo statusa ne imeet.
