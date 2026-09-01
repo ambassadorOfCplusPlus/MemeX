@@ -3213,3 +3213,39 @@ Otdelno otmecheno revju i ne javljaetsja oshibkoj: pri obertyvanii koltca posere
 `upload` delaet `batch_end(); batch_begin();`, a `batch_begin` zhdjot - to est srednij sliv
 tiho degradiruet k sinhronnomu. Eto ta zhe ochered na odnom zabore, chto i 0,545 ms vyshe, i
 lechitsja tem zhe koltsom iz dvuh slotov.
+
+### Rashozhdenie ZAKRYTO: vinovat tekst, i oba chisla dvizhka vosproizvedeny vmeste
+
+Trassa snjata na sobstvennom tekste bencha (`moe-trace` po `prompt_2000.txt`, 2153 tokena odnim
+dekodom) i proigrana toj zhe politikoj:
+
+    dvizhok (PROMO_AB, C=12, period 32)             71,2958%   1,68 podkachki/token
+    proigryvanie, tekst bencha, progrev 512 -> [512:704]  70,76%   1,70
+    proigryvanie, nashi korpusa, tot zhe protokol    46,74 / 49,02 / 52,15%   4,26
+
+Razryv 25 punktov -> **0,54**. I - eto vazhnee samogo sovpadenija - **vosproizvelis oba chisla
+srazu**: 70,76% moglo byt sovpadeniem, no hit rate i chislo podkachek, pridja iz odnogo
+proigryvanija odnoj politiki, est odin i tot zhe fakt, skazannyj dvazhdy cherez raznuju mehaniku.
+
+**Simuljator ispraven.** Nenormalen tekst. Chestnoe razdelenie: sam tekst dajot ~21-24 punkta iz
+25, polozhenie okna - ostalnoe (okno, sovpadajushchee s `rrep.gen`, okazalos samym blagoprijatnym
+v fajle: 70,76% protiv srednego 67,48% po 23 oknam). Ljuboe okno na etom tekste vyshe ljubogo
+okna na nashih (42,7-56,8%).
+
+Proverka na absurd, bez kotoroj rezultat ne rezultat: orakul pri C=12 na tom zhe okne dajot
+72,07% protiv 70,76% u LFU. Onlajn ne obognal jasnovidjashchego - porjadok soblyudjon.
+
+**Sovpadenie C=29 mertvo.** Na tekste bencha C=29 dajot **93,80%**, a ne 71,7%. Dva chisla vida
+"71,3" byli raznymi emkostjami na raznyh nagruzkah i ne imeli drug k drugu otnoshenija. Chto
+ustojalo: transkripcija shoditsja s `vram_residency.py` do 0,04 punkta i vosproizvodit 67-80%,
+zadokumentirovannye v `resident_set.hpp` pri C=29 - i teper ponjatno pochemu: ta cifra sama byla
+poluchena na offlajn-trassah vrode nashih, a ne na zhivom dvizhke.
+
+**Chto sdelano po itogu.** `promo_async_ab.ps1` prinjal `-Prompt`. Znachenie po umolchaniju
+ostavleno prezhnim namerenno: smena slomala by sopostavimost so vsemi istoricheskimi chislami
+v STATE. Chestnoe plecho zapuskaetsja bez pravki skripta:
+
+    -Prompt D:\MemeX\results\specpf\prompt_code1.txt
+
+eto tot samyj korpus, s kotorogo snjaty trassy, tak chto dvizhok i offlajn vpervye budut merit
+odin tekst.
