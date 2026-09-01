@@ -107,11 +107,11 @@ function RunOnce {
 # razdelilo" rather than "no effect", which is the only reason this was caught rather than
 # recorded as a closed line.
 $arms = @(
-    @{ t = 'sloi';     x = @('--gpu-static-layers');                want = 1 },
-    @{ t = 'sloi+exp'; x = @('--gpu-static-layers','--gpu-experts'); want = 2 }
+    @{ t = 'sloi';     x = @('--gpu-static-layers')                },
+    @{ t = 'sloi+exp'; x = @('--gpu-static-layers','--gpu-experts') }
 )
 $acc = @{}
-foreach ($arm in $arms) { $acc[$arm.t] = @{ wait = @(); submit = @(); gen = @() } }
+foreach ($arm in $arms) { $acc[$arm.t] = @{ wait = @(); submit = @(); gen = @(); nctx = @() } }
 
 ("`n`n######## porog ocheredi " + (Get-Date)) | Add-Content $LOG
 Say 'PREDSKAZANIE (zapisano do progona): esli delo v zanjatosti ocheredi, u KONTEKSTA 0 ozhidanie na peresechenie UPADET v pleche st+exp, hotja raboty tam bolshe. Rost = obychnaja konkurencija za ochered, i linija umiraet.'
@@ -123,12 +123,19 @@ for ($r = 1; $r -le $Reps; $r++) {
         foreach ($arm in $arms) {
             $res = RunOnce "$($arm.t)_$r" $arm.x 1800
             if ($res.err -ne '') { Note ("raund ${r} $($arm.t): " + $res.err); continue }
-            if ($res.nctx -ne $arm.want) {
-                Note ("raund ${r} $($arm.t): kontekstov $($res.nctx), zhdali $($arm.want) - plecho ne to, vybrosheno")
-                continue
-            }
-            if (-not $res.ctx.ContainsKey(0)) { Note ("raund ${r} $($arm.t): net konteksta 0 - vybrosheno"); continue }
-            $c0 = $res.ctx[0]
+            # Identify the LAYER context by its crossing count, not by its index or by how
+            # many contexts exist. Both of those were wrong: the head now lives on the card too
+            # and opens its own context, so the arms came back with 2 and 3 rather than the 1
+            # and 2 this script first demanded, and every arm was thrown away. The layer path
+            # crosses ~48 times a token and the head once, so the busiest context IS the layer
+            # context - a property of the thing being measured rather than of the wiring.
+            if ($res.ctx.Count -lt 1) { Note ("raund ${r} $($arm.t): FENCE_SPLIT ne napechatan - vybrosheno"); continue }
+            $c0 = $null; $best = -1
+            foreach ($k in $res.ctx.Keys) { if ($res.ctx[$k].n -gt $best) { $best = $res.ctx[$k].n; $c0 = $res.ctx[$k] } }
+            # And the arm still has to say which arm it is: the expert arm must have MORE live
+            # contexts than the plain one. Recorded per round and checked at the end, because
+            # neither count is knowable in advance once the head moved.
+            $acc[$arm.t].nctx += $res.ctx.Count
             $acc[$arm.t].wait   += $c0.wait
             $acc[$arm.t].submit += $c0.submit
             if ($res.ContainsKey('gen')) { $acc[$arm.t].gen += $res.gen }
@@ -148,11 +155,21 @@ function Summ($name, $v) {
     return ("{0,-22} {1,9:N4} (razbros {2,5:P1}, n={3})" -f $name, $m, $sp, $a.Count)
 }
 foreach ($arm in $arms) {
+    Note (Summ "$($arm.t) kontekstov" $acc[$arm.t].nctx)
     Note (Summ "$($arm.t) zhdjom ms"  $acc[$arm.t].wait)
     Note (Summ "$($arm.t) submit ms"  $acc[$arm.t].submit)
     Note (Summ "$($arm.t) tok/s"      $acc[$arm.t].gen)
 }
 $ws = @($acc['sloi'].wait); $we = @($acc['sloi+exp'].wait)
+$ns = @($acc['sloi'].nctx); $ne = @($acc['sloi+exp'].nctx)
+if ($ns.Count -ge 1 -and $ne.Count -ge 1) {
+    $mns = ($ns | Measure-Object -Average).Average
+    $mne = ($ne | Measure-Object -Average).Average
+    if ($mne -le $mns) {
+        Note ("kontekstov v pleche s ekspertami $mne, bez nih $mns - ekspertnyj put ne zapustilsja, VSJO VYBROSHENO")
+        exit 5
+    }
+}
 if ($ws.Count -ge 2 -and $we.Count -ge 2) {
     $ms = ($ws | Measure-Object -Average).Average
     $me = ($we | Measure-Object -Average).Average
