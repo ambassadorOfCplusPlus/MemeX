@@ -1654,3 +1654,53 @@ samaja ubeditelnaja forma oshibki. On uzhe vozvrashchalsja tri raza i vernjotsja
 **Formulirovka dlja proverki lyubogo potolka:** nazvat, cherez KAKOJ kanal idut bajty, prezhde chem
 delit na ego polosu. Odna model daet stolko raznyh potolkov, skolko u nejo kanalov, i vybor
 kanala - eto vybor konfiguracii, a ne svojstvo modeli.
+
+## 85. Zond, sdelannyj VIDOM, izmerjaet ne to, chto nazyvaet
+
+Zond - eto kanal (pravilo 83), i u nego est svojo "NE IZMERENO", kotoroe on ne umeet vyrazit.
+Vid v pereispolzuemyj bufer vsegda vernjot KAKIE-TO chisla, pravdopodobnye po porjadku velichiny,
+i nikogda ne skazhet "eti bajty uzhe ne moi". `ggml_set_output` na VIDE ne zashchishchaet pamjat
+roditelja.
+
+Priznak, po kotoromu eto lovitsja za sekundu: **odno i to zhe znachenie na raznyh slojah.** Ljubaja
+velichina, zavisjashchaja ot vhoda, objazana razlichatsja mezhdu slojami; sovpadenie do pjatogo
+znaka - eto ne "pochti verno", a "eto ne to chislo".
+
+**Zond objazan imet sobstvennoe hranilishche.** I on objazan byt V GRAFE: kopija, kotoruju nikto
+ne potrebljaet, ne popadaet v `gf`, gallocr ne dajot ej bufera, i chtenie padaet na
+`GGML_ASSERT(buf != NULL)`. Perenaznachat, a ne obertyvat.
+
+## 86. Mikroproba objazana soobshchat SKOROST, a ne tolko vremja
+
+Vremja odnogo malenkogo vyzova - eto nakladnye rashody kanala, i ono odinakovo dlja vsego, chto
+v etot kanal ne upiraetsja. Proba na 2,1 M umnozhenij dala vsem chetyrjom tipam 0,09-0,15 ms, i
+eto bylo prochitano kak "tipy odinakovy". Na realnom razmere te zhe tipy razoshlis vtroe, a odna
+i ta zhe forma pokazala 45,7 i 122 GMAC/s.
+
+**Pravilo:** proba nazyvaet edinicy raboty v edinicu vremeni i razmer, na kotorom merila. Bez
+etogo nelzja otlichit "bystro" ot "slishkom malo raboty, chtoby uvidet raznicu".
+
+## 87. Kanal, nazyvajushchij ODIN element iz neskolkih, skryvaet ostalnye
+
+`uploaded_type_name()` vozvrashchal `up_[0]->type` i pechatalsja kak "tip v videopamjati". U
+gemma4 tri ekspertnyh tenzora imejut TRI raznyh tipa (q4_K, q4_K, q5_1), i model opisyvalas
+odnim iz nih. Tret raboty ekspertov shla tipom, kotorogo nikto ne videl.
+
+Tot zhe defekt v `verify_layers`, pechatavshem "n_layer x 13 slotov", iz kotoryh chetyre ne
+sravnivalis, i v `st_.checked`, schitavshem slot kak proverennyj do vsjakogo sravnenija.
+
+**Pravilo:** esli u sushchnosti neskolko odnorodnyh chastej, kanal nazyvaet libo VSE, libo skolko
+imenno on nazval. "Tip", "slotov", "proverено" v edinstvennom chisle - eto utverzhdenie obo vsjom
+naboře, i ono lozhno, kak tolko nabor perestal byt odnorodnym.
+
+## 88. Arifmetika nazyvaet mesto ran'she, chem dannye
+
+Shirina eksperta u gemma4 - 704. Superblok vseh K-kvantov - 256 elementov, i tenzor s ne0, ne
+kratnym bloku, sushchestvovat ne mozhet. **704 / 256 = 2,75**, znachit `ffn_down_exps` fizicheski
+ne mozhet byt q4_K - chto by ni pechatal dvizhok. Gistogramma fajla eto potom podtverdila (29
+tenzorov q5_1, blok 32, 704 = 22 x 32), no znat mozhno bylo do togo, kak ejo otkryli.
+
+Eto ne prizyv dogadyvatsja: eto prizyv proverjat ogranichenija formata na svoih chislah. Tri
+gipotezy o prichine, vydvinutye v tot zhe den rassuzhdeniem o mehanizme (bjudzhet uzlov, obshchij
+schjotchik chankov, parametr limit), okazalis nevernymi vse tri. Vernoj okazalas ta, chto
+opiralas na delimost.
