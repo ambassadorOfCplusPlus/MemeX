@@ -4294,3 +4294,29 @@ kotoraja nuzhna dlja C=16, i tri obhoda (menshij ubatch, koroche promt, snjataja
 Chto ostajotsja neprovereno imenno: chto pri 16 slotah na sloj logity sovpadajut s etalonom.
 Put vychislenija tot zhe, chto pri 12 (proveren 192/192), otlichaetsja tolko chislo slotov, a ono
 zakryto bajtovoj sverkoj. Riska ne vizhu, no i "proverено" skazat nelzja.
+
+## Chto dast razgon OZU: raschjot, a ne dogadka
+
+Obe processornye poloviny idut na 100% predela DDR4: izmereno 24,8 GB/s pri teoreticheskih 38,4
+dlja 2400 v dvuh kanalah, to est 64,6% effektivnosti. Pri 3200 pik 51,2, i pri toj zhe
+effektivnosti vyjdet **33,1 GB/s - v 1,335 raza bolshe**.
+
+                processornaja polovina   stanet   ekonomija        itog
+    Kvin              10,78 ms            8,07    -2,7 iz 50,7    ~20,8 tok/s
+    Gemma            ~36,0 ms            27,0     -9,0 iz 73,7    ~15,3 tok/s
+
+Porog 20 tok/s na Kvine perehoditsja. U Gemmy pribavka bolshe v procentah, potomu chto u nejo
+processornaja polovina - 49% tokena protiv 21% u Kvina.
+
+**Tri ogovorki, i pervaja pro moj zhe zamer.**
+
+  1. Pribavka Kvina s 18,75 do 19,74 ot osvobozhdennoj videopamjati - eto ODNA para progonov, a
+     razbros u Kvina 3,6%. Zajavljat 5,3% kak rezultat ja ne dolzhen byl; nuzhen A/B s povtorami.
+  2. Sokratitsja li token na vsju ekonomiju, zavisit ot perekrytija polovin, a ego ja segodnja
+     DVAZHDY smodeliroval neverno: snachala vzjal `max(karta, cpu)` i predskazal, chto bolshe
+     emkosti navredit (izmerenie oprovergnulo), potom "karta + cpu" - i schjot po dvum plecham
+     dajot `cpu + zhdjom` pochti nesменnym (21,82 i 21,69 ms) pri raznice tokena v 2,67 ms, to
+     est i eta model ne sxoditsja. **Perekrytie nado izmerit otdelnym instrumentom, a ne vyvodit
+     iz summ.**
+  3. XMP na etoj plate uzhe klal PK v cikl perezagruzki. 2666 ili 2933 mogut vstat tam, gde
+     3200 ne vstajot, i eto stoit probovat stupenjami.
