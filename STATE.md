@@ -4354,3 +4354,34 @@ K ot 2 do 6 srednee obedinenie, otnoshenie bajt-na-token i potolok uskorenija pr
 
 Dve ogovorki zond pechataet sam: eto marshrutizacija NASHEGO prompta, a ne sobstvennogo prodolzhenija
 modeli (raznye populjacii, pravilo 87), i eto POTOLOK - dolja prinjatyh chernovikov v nego ne vhodit.
+
+### IZMERENO: perekrytie est, i ono bolshoe
+
+    Gemma (128 ekspertov, top-8, 30 sloev)        Kvin
+    K=2  obedinenie 12,98 iz 16   x1,232          12,10 iz 16   x1,323
+    K=3  obedinenie 16,65 iz 24   x1,441          15,51 iz 24   x1,547
+    K=4  obedinenie 19,79 iz 32   x1,617          18,30 iz 32   x1,749
+    K=5  obedinenie 22,52 iz 40   x1,776          20,19 iz 40   x1,981
+    K=6  obedinenie 24,89 iz 48   x1,929          21,74 iz 48   x2,208
+
+Sosednie tokeny delят ekspertov sushchestvenno: pri K=4 Gemma chitaet 19,8 ekspertov vmesto 32,
+to est 62% bajtov. Eto ne mnozhitel K, no i ne nol.
+
+**Chto eto dajot Gemme** (prohod = karta 35,0 ms odin raz + processor 36,0 * obedinenie/8):
+
+    K=4:  prohod 124,1 ms.  prinjato 4 -> 32,2 tok/s | 3 -> 24,2 | 2,5 -> 20,1 | 2 -> 16,1
+
+**TOCHKA BEZUBYTOCHNOSTI - glavnoe chislo.** Nizhe nejo MTP delaet HUZHE, chem seichas (73,7 ms):
+
+    K=2  nuzhno prinimat 1,27 iz 2  (63%)
+    K=4  nuzhno prinimat 1,68 iz 4  (42%)
+    K=6  nuzhno prinimat 1,99 iz 6  (33%)
+
+Bolshoj K luchshe po OBOIM osjam srazu: i potolok vyshe, i trebovanie k dole prinjatyh nizhe.
+Eto redkij sluchaj, kogda net kompromissa, i on prjamo govorit celitsja v K=4..6, a ne v K=2.
+
+**Chto ostajotsja rabotoj.** `gpu_static.cpp:138` - kartochnyj put SOZNATELNO postroen pod
+n_tokens == 1 ("Decode only, deliberately"). Processornye stroiteli grafov K tokenov uzhe umejut
+(prefill imi i idjot), tak chto est rabochij etalon dlja sverki - rovno tot mehanizm, kotorym my
+proverjali vsjo ostalnoe. Nuzhno: (1) vesa chernovika (v nashem GGUF ih net), (2) kartochnyj put na
+K tokenov, (3) prijom/otkat s otkatom KV.
