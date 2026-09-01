@@ -3011,3 +3011,80 @@ sovpadenie do pjatogo znaka - eto ne "pochti verno", a "eto ne to chislo".
 Formulirovka: **zond objazan imet sobstvennoe hranilishche.** Esli velichina, kotoruju hochetsja
 proverit, zhivjot vidom v chuzhoj bufer - kopiruj ejo, a ne nazyvaj vidom. I pered tem kak
 stroit gipotezu o vychislenii, proverjaj, razlichajutsja li znachenija zonda po slojam.
+
+## HOBBIT: predskazanie na sloj vperjod RABOTAET, no ne okupaetsja
+
+Dve mery, obe offlajn, obe s predskazanijami zapisannymi do progona.
+
+**Tochnost - vysokaja, i eto ne povtorenie istorii s obuchennym predskazatelem.**
+
+    d=1  perekrytie 83,94%   cos(X_L, X_L+1) 0,9156
+    d=2             77,49%                   0,8471
+    d=3             72,08%                   0,7862
+
+    to zhe pri toj zhe emkosti:  chastota 30,18%,  preduydushchij token 44,59%
+    kontrol na peremeshivanii (chuzhoj token v tot zhe marshrutizator): 19,35%
+
+Obuchennyj predskazatel umer imenno na sravnenii s chastotoj: 80,2% protiv 45,9% offlajn, a
+onlajn proigral chastote v 89 tochkah iz 97. Zdes pereves nad chastotoj **54 punkta**. Kanal
+nastojashchij. Instrument proveren do togo, kak emu poverili: d=0 (marshrutizator sloja L na
+ego zhe vhode) vosproizvodit zapisannyj vybor na 99,99%.
+
+**Ekonomika - otricatelnaja, i ne na granice.**
+
+    C=29, LFU, bez predvyborki   71,70%
+    C=29, LFU, s predvyborkoj    82,03%   pri 47,66 podkachkah na token
+    ------------------------------------------------------------------
+    +10,33 punkta popadanij za 47,66 podkachek = 0,26 punkta na podkachku
+
+Porog okupaemosti 0,97 punkta na podkachku pri POLNOSTJU sprjatannom zabore i 3,55 bez nego.
+My korotki v **3,7 raza v samom luchshem sluchae, kotoryj dvizhok voobshche mozhet predlozhit**.
+Po vremeni: **-10,40 ms na token** dazhe esli zabor ischeznet polnostju, i -48,16 esli net.
+
+Predvyborka pri etom rabotaet pochti ideal'no. Odna predvyborka na sloj mozhet vernut ne bolshe
+1 slota iz 8 = 12,5 punkta, i ona vernula 10,33 - to est **82,6% svoego potolka**, chto sovpadaet
+s tochnostju 83,94%. Ne mehanizm ploh, a potolok nizok.
+
+**Nozhnicy na cap>1 - ne tam, gde my dumali.** Cap 2 i 3 huzhe cap 1 **po samomu popadaniju**
+(+9,09 i +7,81 protiv +10,33), potomu chto ushcherb ot vytesnenija obgonjaet pribavku. Ogranichenie
+po DMA (odna peredacha 0,64 ms v sloj 1,15 ms), kotoroe ja nazval svjazyvajushchim, ne uspevaet
+srabotat - politika zapreshchaet ranshe.
+
+**Globalnyj nabor protiv poslojnogo** (tot zhe polnyj chislo slotov): +0,24 punkta pri C=29,
++0,42 pri C=12, znak odinakov vo vseh shesti jachejkah. Eto +0,1% tokena protiv poroga shuma 4,2%.
+Zakryto: dva sistemy v literature schitajut etot vybor vazhnym, u nas on ne stoit nichego.
+
+### Popravka k vyvodu agenta: "prosto podnjat emkost" na etoj karte NEVOZMOZHNO
+
+Agent nazval alternativu: C=40 s obychnym LFU dajot 81,03% pri 9,08 podkachkah - pochti tot zhe
+vyigrysh v pjat raz deshevle. Eto verno kak arifmetika i neprimenimo kak sovet:
+
+    kucha 0: bjudzhet 2975 MiB, zanjato 2832,58 - svobodno ~143 MiB
+    C 12 -> 40 eto 48 sloev x 28 ekspertov x 2,51 MB = 3,37 GB
+
+Mesta net i blizko. Tak chto predvyborka zakryta **svoej sobstvennoj arifmetikoj** (-10,40 ms),
+a ne sushchestvovaniem bolee deshjovoj zameny; zamena zhe - eto zapros na druguju kartu, a ne
+reshenie. Zapisyvaetsja imenno tak, chtoby potom nikto ne prochital "nado bylo prosto podnjat C".
+
+### OTKRYTOE RASHOZHDENIE: simuljator i dvizhok rashodjatsja na 25 punktov
+
+Dvizhok pri emkosti 12 dajot **71,30%** (`PROMO_AB ... period 32 capacity 12 ... hits 71,2958`).
+Dva nezavisimyh offlajn-proigryvanija - svezhaja transkripcija `resident_set.cpp` i nash sobstvennyj
+`memex/vram_residency.py` - dajut pri toj zhe emkosti **46,55%**, i shodjatsja mezhdu soboj s
+tochnostju 0,04 punkta. 71,7% u nih poluchaetsja tolko pri C=29.
+
+Opredelenie ne vinovato: `resident_set.cpp:174` schitaet `is_resident`, ne `is_claimed`, tak chto
+pending v popadanija ne popadaet.
+
+Ostajotsja nagruzka, i zdes samoe verojatnoe objasnenie: dvizhok merit popadanija **na 192 tokenah
+generacii posle progreva 512-tokennym prefillom na tom zhe tekste**, a proigryvanie idjot po
+raznorodnym trassam s holodnogo starta. Prodolzhenie odnogo teksta pereispolzuet uzkij nabor
+ekspertov; raznye dokumenty - net.
+
+Pochemu eto nado zakryt, a ne ostavit snoskoj: **cherez hit rate ocenivaetsja vsjo v etom proekte**
+(1 punkt = 0,368 ms). Poka rashozhdenie ne nazvano, ljuboj offlajn vyvod o politike stoit na
+neproverennom perevode. Verdikt po predvyborke ot etogo ne zavisit - on otricatelen i pri C=12,
+i pri C=29 - no sledujushchij takoj vyvod mozhet zaviset.
+
+Proverka deshjovaja: proigrat tot zhe prompt bench-a (512 tokenov progreva, potom 192) i sverit
+s 71,30%.
