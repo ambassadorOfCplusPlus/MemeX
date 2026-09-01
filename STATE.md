@@ -3249,3 +3249,72 @@ v STATE. Chestnoe plecho zapuskaetsja bez pravki skripta:
 
 eto tot samyj korpus, s kotorogo snjaty trassy, tak chto dvizhok i offlajn vpervye budut merit
 odin tekst.
+
+## Audit vseh kanalov proverki: 15 nahodok, iz nih tri v tom, chto ja pochinil segodnja
+
+Posle togo kak zond Gemmy okazalsja artefaktom, byl zapushchen audit VSEH kanalov proverki na tot
+zhe klass. Nashlos mnogo, i pervye tri - v moej zhe segodnjashnej pravke.
+
+**1. Pravka zondov Gemmy byla NEPOLNA (ispravleno).** `ggml_cont` obernul `hd_in`/`moe_in`, no ne
+perenaznachil ih, a nizhe po tekstu stojali eshchjo dva `push_back` teh zhe imjon, zakrytye tolko
+`keep_probes`, a ne `!card`. Na karte kazhdoe imja uhodilo DVAZHDY: raz kak kopija, raz kak syroj
+vid v pereispolzuemyj `card_lay`. I eto pobezhdalo detektor, napisannyj imenno pod etot defekt:
+tridcat horoshih znachenij ot kopii prjachut tridcat odinakovyh ot vida.
+
+**2. Pravka zondov Gemmy byla SLOMANA (ispravleno).** Konty nikto ne potrebljal, poetomu oni ne
+popadali v `gf`, gallocr ne davala im bufera, i pervoe zhe chtenie zonda upiralos v
+`GGML_ASSERT(buf != NULL)`. Progon na karte **padal** s `STATUS_STACK_BUFFER_OVERRUN`, ne napechatav
+ni odnogo zonda karty. Pravka: `ggml_cont` teper PRISVAIVAETSJA obratno, tak chto kopija vhodit v
+nastojashchij potok dannyh i vydeljaetsja kak ljuboj drugoj uzel.
+
+**3. I moj detektor napechatal po etomu padeniju "raznye po slojam - horosho" (ispravleno).**
+193 zonda iz prefilla (schitannye na hoste) dali 29 razlichnyh znachenij na semejstvo, i vердикт
+vyshel zeljonym po progonu, kotorogo ne bylo. Eto pravilo 82 i pravilo 83 odnovremenno, v
+instrumente, napisannom segodnja imenno protiv nih. Teper `Show-FirstBad` i `Show-LayerSpread`
+prinimajut kod vyhoda i govorjat **NE IZMERENO**, a ne vydajut verdikt.
+
+**4. Gemma na karte NIKOGDA ne generirovala na karte (ispravleno).** `build_gemma4_step` v meste
+sborki dekodnogo grafa vyzyvalsja BEZ `gsp`, a poslednij argument u nejo po umolchaniju `nullptr`.
+Vetka qwen3moe rjadom `gsp` peredaёt vsegda. Pri etom `place_layers` uzhe otrabotala, bajty uzhe
+sverены, i v logе stojalo "vnimanie, marshrutizatory i KV-kesh na karte: 30 sloev ... v
+videopamjati". **To est vsjakoe chislo tok/s Gemmy s `--gpu-static-layers` bylo chisto
+processornym chislom pod strokoj o tom, chto sloi na karte** - vkljuchaja 5,94 tok/s. Kartu zval
+tolko `Generator::build_one`, a `gen.gstat` stavitsja lish pod `--decode-check`: poetomu sverka
+zondov kartu proverjala, a zamer skorosti - net.
+
+Dobavlena pechat, bez kotoroj eto ne vsplylo by i v sledujushchij raz: graf sam govorit
+`graf dekoda: sloi schitaet KARTA | processor (karta zapolnena, no graf ejo ne zovjot)`.
+Banner `place_layers` govorit, chto ZAGRUZHENO, a ne chto ISPOLZUETSJA - dlja gemma4 eti dva
+utverzhdenija rashodilis vsjo vremja sushchestvovanija arhitektury.
+
+**Ostalnoe iz audita, ne ispravleno, spisok po ubyvaniju vreda:**
+
+  5. `build_step` (qwen3moe) i `build_dense_step` (chernovik) ne pushat NI ODNOGO zonda na dekodnom
+     grafe. `--decode-check N --probe all` na qwen3moe pechataet pustoj razdel zondov, chto
+     neotlichimo ot "vse sloi soshlis". Zondy qwen3moe zhivut v `build()` - prefilnom grafe,
+     kotoryj dekodnaja proverka ne ispolzuet.
+  6. Reporter zondov do sih por ne umeet skazat "ne sravnivalos": `if (!ref_t) continue`.
+     Chetyre imeni mertvy - `attn_out_resid`, `ffn_moe_out` (etalon zovjot ego `routed_out`),
+     `q-<il>` (nenepreryvnyj, otkazyvaetsja molcha), `Vcur` na pjati slojah bez `wv`.
+  7. `--zoned-check` pechataet VOROTA PROJDENY, kogda hvost pust: pri `n_tail == 0` oba plecha -
+     odno i to zhe vychislenie s tochnostju do porjadka summirovanija. Porog - 260 pozicij.
+  8. `--draft-check` sudit golym argmax bez `compare_logits`: dva nulevyh vektora dajut "sovpal"
+     i kod vyhoda 0.
+  9. `verify_layers` pechataet "n_layer x 13 slotov", a chetyre slota u qwen3moe nulevye s oboih
+     storon i ne sravnivajutsja. Nazyvaet chislo, kotoroe ne proverjalo.
+ 10. `VERIFY_AB slots 0 bad 0` pechataetsja kak uspeh; ni odin total ne zakryt v `ok`.
+ 11. `--gpu-experts-check` schitaet `st_.checked` do vsjakogo sravnenija, vkljuchaja sluchaj
+     "oba nulja". `st_.layers_empty` - edinstvennoe chislo, kotoroe pokazalo by, skolko sloev
+     proshlo bez raboty na ustrojstve - ne pechataetsja nikogda.
+ 12. `gpu_static_selftest`: `rel = den > 0 ? ... : 0.0` - nulevaja etalonnaja stroka schitaetsja
+     ideal'nym sovpadeniem (pravilo 11). Sosednij modul v tom zhe dereve vozvrashchaet 1.0.
+ 13. `op_probe` vozvrashchaet void, ne zakryt v `ok`, i ne proverjaet `supports_op` - a
+     Vulkan-bekend na nepodderzhannoj operacii pishet v stderr i **vozvrashchaet uspeh**.
+ 14. Dve realizacii sravnenija raznoj strogosti; vse stroki zondov idut cherez slabuju.
+ 15. `--probe list` vidit tolko pervye 120 uzlov - dva-tri sloja iz tridcati.
+
+**Chto v audite okazalos chistym, i eto vazhno zapisat otdelno.** Vse 39 `push_back` razobrany do
+porozhdajushchej operacii: krome nazvannyh, kazhdyj zond - vyhod nastojashchej operacii so svoim
+hranilishchem. `--gpu-experts-selftest` - samyj sil'nyj kanal v dereve: ego vorota javno
+otkazyvajut vyhodu ustrojstva, bit v bit sovpavshemu s processornym (`med > 0.0`). Rannjaja
+oshibka `--decode-check`, sravnivavshego put bez karty sam s soboj, dejstvitelno ispravlena.
