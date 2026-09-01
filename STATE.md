@@ -3736,3 +3736,28 @@ blok tipa ne delit n_embd, pechataetsja "propushchen", a ne molchanie i ne paden
 Predskazanie do progona: esli q5_1 na etom ustrojstve idjot na edinicy GMAC/s, najdeny i
 prichina 12x, i lechenie - perekvantovat TOLKO down v tip s blokom 32 i bystrym Vulkan-putjom
 (iq4_nl) ili v tip s blokom 256, esli shirinu eksperta mozhno dopolnit.
+
+### Tri gipotezy - tri oproverzhenija, i chto ostalos NEIZMERENNYM
+
+Ispravlennaja proba, 8 slotov, real'nye razmery, skorost ryadom so vremenem:
+
+    svjortka 2048 (up/gate qwen3moe):  iq4_xs 45,9  q8_0 45,8  q4_K 42,1  q6_K 41,7  q5_1 35,4
+    svjortka 2816 (up/gate gemma4):    q4_K 122,2  q6_K 122,3  q5_1 116,1  iq4_xs 101,0  q8_0 94,6
+
+  - **Tip ne vinovat**: q4_K samyj bystryj ili vtoroj na obeih formah.
+  - **Forma ne vinovata**: forma gemma4 v 2,7 raza BYSTREE formy qwen3moe.
+  - **q5_1 ne vinovat**: 116,1 GMAC/s, prakticheski kak q4_K.
+
+Vse tri gipotezy, kotorye ja vydvinul, zakryty. Dvizhok pri etom pokazyvaet 9,7 GMAC/s.
+
+**Chego proba NIKOGDA ne merila, i eto tret raboty.** U mul_mat_id v etom grafe DVE raznyh
+orientacii, a proba merila odnu: up i gate svjortyvajut po n_embd i vydajut n_ff, a **DOWN
+svjortyvaet po n_ff i vydajot n_embd** - KOROTKAJA svjortka s bolshim vyhodom, ta samaja forma,
+kotoraja byvaet medlennoj. U Gemmy eto svjortka 704 protiv 2816 u up/gate.
+
+Arifmetika, kotoruju proverit sledujushchij progon: pri 122 GMAC/s up i gate stojat po 0,130 ms,
+a izmereno na ves dispatch 4,736. Znachit esli vinovat down, on dolzhen idti okolo
+**3,65 GMAC/s** - v 33 raza medlennee sosedej. Chislo nazvano do progona.
+
+Dobavleny dve formy: DOWN qwen3moe (768 -> 2048) i DOWN gemma4 (704 -> 2816). K-kvanty na
+posledней budут propushcheny s javnoj nadpisju: 704 ne kratno 256.
