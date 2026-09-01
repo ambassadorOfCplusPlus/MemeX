@@ -3531,3 +3531,40 @@ Dva punkta iz vtorogo prohoda ispravleny srazu:
     nedostatochnym.
   - shag-0 proverka videopamjati pechatala "svereno slotov 0, rashozhdenij 0" kak uspeh:
     remont dosталsja tolko posle-generacionnoj kopii, a etoj net.
+
+## Kesh ekspertov Gemmy: rabotaet skvozno, no summa polovin rashoditsja - hod rassledovanija
+
+Skvoznoj progon sostojalsja: vesa gruzjatsja (1,26 GiB v videopamjati, tip q4_K), maska dohodit
+do grafa (7680 slotov, rashozhdenij 0), ustrojstvo schitaet svoju polovinu. No summa polovin
+rashoditsja, i tri gipotezy podrjad okazalis nevernymi - vse tri zakryty izmereniem.
+
+**1. Bjudzhet uzlov (moja pervaja stavka).** Kommentarij v kode preduprezhdaet, chto nehvatka
+dajot USECHJONNYJ graf, a ne oshibku. Postavil proverku: **1085 uzlov iz 6016** s kartoj, 1890
+bez nejo. Gipoteza mertva, instrument ostalsja - `build_gemma4_step` teper otkazyvaetsja stroit
+graf, podoshedshij k bjudzhetu blizhe chem na 16 uzlov.
+
+**2. Obshchij schjotchik chankov u dvuh slityh operacij v odnom grafe.** Vygljadelo ubeditelno:
+`current_chunk` obshchij na graf, i vtoroj uzel mog by nichego ne poschitat. Sbros s barjerom
+stoit na meste (ggml.c:18538).
+
+**3. Parametr `limit` (op_params[1]).** Ni `ggml_moe_up_gate`, ni `_ext` ego ne stavjat - no
+op_params obnuljaetsja pri sozdanii tenzora, tak chto on nulevoj v OBOIH putjah.
+
+**Chto lokalizovano tochno.**
+
+  - **Ustrojstvo i zagruzchik slitogo tenzora nevinovny.** Rasshcheplenie BEZ karty voobshche
+    dajot tot zhe NaN. Znachit delo v grafe, a ne v perenose bajtov.
+  - **`L2 -1.000000000%` bylo ne rashozhdeniem, a OTKAZOM sravnenija.** Kanal pechatal -1 i
+    chitalsja kak "razoshlos". Teper pechataetsja prichina, i ona okazalas "NaN ili beskonechnost
+    v dannyh" - sovsem drugoj klass defekta, chem tot, kotoryj ja iskal.
+  - **Pervyj nefinitnyj tenzor - `kq-1`**, to est proizvedenie Q na K na sloe 1. Ne eksperty:
+    VNIMANIE. Qcur-1 i Kcur-1 pered nim finitny, i ves sloj 0 finiten.
+
+Novyj instrument, postojannyj: posle pervogo shaga rasshcheplennyj graf skaniruetsja na pervyj
+nefinitnyj zond i nazyvaet ego po imeni. Do etogo kanal umel skazat tolko "logity ne finitny",
+to est "gde-to v tridcati slojah".
+
+**Otkrytoe i nazvannoe: prefill Gemmy na etom tekste sam po sebe dajot L2 42,75%**, i eto bylo
+do vsjakogo rasshcheplenija. Idjot kontrolnyj progon s temi zhe zondami i BEZ rasshcheplenija:
+esli `kq-1` tam tozhe NaN, rasshcheplenie nevinovno celikom, a vinovat uzhe zapisannyj defekt
+gemma4 na `prompt_2000.txt`.
