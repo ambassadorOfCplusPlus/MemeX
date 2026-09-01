@@ -3487,3 +3487,47 @@ Chto menjaetsja v kode (faza 1, plumbing):
 Faza 2 - graf: rasshcheplenie routed-poloviny v `build_gemma4_step` (fork/join, summa dvuh
 polovin, `down_scale` cherez src[2] u `mul_multi_add`). Eto bolshaja chast raboty; faza 1
 samodostatochna i proverjaetsja sushchestvujushchej samoproverkoj.
+
+## Kesh ekspertov dlja Gemmy: napisan, pervyj skvoznoj progon
+
+Faza 1 (zagruzchik):
+  - `PlainSrc` razdeljon na `stride` (bajty mezhdu ekspertami v istochnike), `slab` (bajty ETOJ
+    roli) i `sub` (smeshchenie roli vnutri sreza). Ne-slityj sluchaj: stride == slab, sub == 0,
+    to est put ne izmenilsja ni na bajt.
+  - `desc()` i RAM-, i fajlovyj puti delajat odno i to zhe delenie. Fajlovyj prishlos pravit
+    otdelno: `desc()` otdajot `plain_[...]` doslovno, i opisannyj tolko v RAM-vetke slityj
+    istochnik prochital by celyj srez v poloviннyj bufer.
+  - v grafe ustrojstva `ggml_silu` -> `ggml_gelu` po flagu `gc.gelu`.
+
+Faza 2 (graf): `build_gemma4_step` prinjal `rs` i `gx`, poluchil `res_mask`, bjudzhet uzlov
+128 -> 192 na sloj pri rasshcheplenii, i razvilku toj zhe formy, chto u `build_step`:
+`resident_split_ids` na dva spiska, `gx->fork` pered vychisleniem chuzhoj poloviny, `gx->join`
+na svoju, i **slozhenie POSLOTNO do vzveshivanija** - imenno tam, gde build_step ob'jasnjaet,
+pochemu inache summa pereassociiruetsja.
+
+Podkljucheno: `gu` i `gg` poluchajut ODIN i tot zhe `ffn_gate_up_exps`, `gc.fused_gate_up` i
+`gc.gelu` po arhitekture, otkaz suzhen s "tolko qwen3moe" do "krome gemma4".
+
+**Chto bylo neverno v samom otkaze.** On glasil: "rasshcheplenie trebuet dvuh progonov odnogo
+tenzora s dvumja spiskami id". Dvuh progonov trebuet GRAF - i on ih delaet, po odnomu na
+polovinu. A ZAGRUZCHIKU rasshcheplenie ne nuzhno vovse: eto dva memcpy po smeshcheniju.
+Odna fraza smeshala dva raznyh mesta i zakryla rabotu na neskolko nedel.
+
+## Vtoroj prohod auditora: on popravil sam sebja, i eto vazhnee ego nahodok
+
+Auditor soobshchil, chto v proshlom otchjote napisal "vyvody podagentov uchteny", togda kak ni
+odin iz dvuh podagentov ne otchitalsja i on teh mest togda ne chital. Perechital - po sushchestvu
+vsjo podtverdilos, krome odnoj detali. **Eto rovno tot klass defekta, kotoryj on i iskal**, i
+soobshchil on o njom sam.
+
+Ego popravka k sebe: `rel_l2` (gpu_experts.cpp:1811) vozvrashchaet 1.0 tolko kogda raznica
+nenulevaja, a pri DVUH nulevyh storonah - 0.0, to est ideal'noe sovpadenie tam, gde nichego ne
+opredeleno. Ta zhe lovushka, chto i vezde.
+
+Dva punkta iz vtorogo prohoda ispravleny srazu:
+  - **sozdannyj moej zhe pravkoj**: vorota samoproverki (`gpu_experts.cpp:2483`) prodolzhali
+    chitat `checked > 0` - tot samyj schjotchik, radi zameny kotorogo byl vvedjon `compared`.
+    Edinstvennoe mesto s zhjostkim verdiktom gatilos na chisle, kotoroe pravka ob'javila
+    nedostatochnym.
+  - shag-0 proverka videopamjati pechatala "svereno slotov 0, rashozhdenij 0" kak uspeh:
+    remont dosталsja tolko posle-generacionnoj kopii, a etoj net.
