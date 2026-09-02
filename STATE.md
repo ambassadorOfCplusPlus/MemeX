@@ -5246,3 +5246,45 @@ NEVOSPROIZVODIMO - rovno tot klass oshibki, kotoryj sjel etu noch (mask_swa). Za
 priblizhajut k 20 tok/s, takoj risk ne opravdan. Mehanizm dlja asinhronnogo submita v dvizhke est
 (ggml_backend_vk_batch_submit/reap, ispolzuetsja put ekspertov), tak chto rabota bounded - no ejo
 nado delat s toj zhe sverkoj po tokenam, chto i vsjo ostalnoe.
+
+### POPRAVKA: 16k padaet na PREFILLE, a ne na keshe
+
+Ja utverzhdal, chto kolco delaet 16k vozmozhnym. Proverka progonom: NET.
+
+    ggml_backend_cpu_buffer_type_alloc_buffer: failed to allocate buffer of size 129228800032
+    gemma4: graf ne razmestilsja (n_tokens 16000, n_kv 16000)
+
+Graf prefilla obrabatyvaet ves promt ODNIM kuskom, i promezhutochnyj kq imeet formu
+[n_kv, n_tokens, n_head] - to est rastjot KVADRATICHNO ot dliny promta. Pri 5500 eto ~2 GB i
+vlezaet, pri 16000 - desjatki gigabajt i ne vlezaet.
+
+**Kolco snjalo ogranichenie po VIDEOPAMJATI, no ne po hostovoj: prefill ne razbit na kuski.**
+Rabochij predel na segodnja - okolo 5500-6000 tokenov (izmereno), a ne 16k. Razbienie prefilla na
+kuski - otdelnaja nesdelannaja rabota, i ona teper glavnoe, chto stoit mezhdu nami i dlinnym
+kontekstom.
+
+## REVJU NASHLO REALNYJ DEFEKT: set_step narushaet svoj kontrakt
+
+`set_step` dokumentiruet sebja kak "vozvrashchaet false i NICHEGO ne menjaet, esli chisla
+negodny". Dlja kolcevogo puti eto ne tak:
+
+  1. Cikl po VSEM slojam bezuslovno perepisyvaet kv_lo/kv_len, G.K->ne[1], G.V->ne[0] i
+     restride kq/probs na NOVYE ekstenty.
+  2. Maska kolca perezalivaetsja bezuslovno, ot novogo n_past.
+  3. I tolko potom, vnutri cikla perenacelivanija ZAPISEJ, srabatyvaet ohrana perehoda cherez
+     granicu kolca: `if (G.ring > 0 && W > 1 && (n_past % G.ring) + W > G.ring) return false;`
+
+K etomu momentu chast sloev uzhe perenacelena, maska uzhe novaja, a t_pos_ i step_past_ eshchjo
+starye. Eto ne "nichego ne izmenilos", a nesoglasovannaja smes.
+
+**I vyzyvajushchie kod `false` IGNORIRUJUT**: oba mesta pechatajut odno preduprezhdenie cherez
+ODNU obshchuju zashchjolku `aim_warned` (obshchuju s nesvjazannym otkazom aim_kv_reads) i posle
+etogo bezuslovno zovut ggml_backend_graph_compute. To est pervyj oborot kolca dajot odno
+soobshchenie za ves process, a kazhdyj sledujushchij - molcha nevernye logity.
+
+**Pri shirine 1 nedostizhimo** (`n_past % ring + 1 > ring` nevozmozhno), to est shtatnyj put ne
+zatronut - eto revjuer proveril otdelno. No `--gpu-static-width > 1` - eto imenno tot put, pod
+kotoryj delalos MTP.
+
+Ispravljaju: proverka DO ljuboj mutacii, otdelnye zashchjolki na raznye prichiny, i otkaz
+set_step dolzhen byt fatalnym dlja shaga, a ne informacionnym.
