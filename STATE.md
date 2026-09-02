@@ -4749,3 +4749,51 @@ Predskazanie ne pomogaet: chtoby sprjatat 23 ms, nado uspet vydat 320 chtenij za
 **Vyvod, kotoryj stoit skazat prjamo: stroit umnyj predzagruzchik na etoj mashine nelzja.**
 Ne potomu chto slozhno, a potomu chto tselevoe ustrojstvo - HDD s 23 ms na sluchajnoe chtenie.
 Pravilnaja rabota v etom napravlenii - kvantovanie i obrezka ekspertov pod razmer OZU.
+
+## RAZGADKA: pri shirine > 1 Vulkan berjot DRUGOE JADRO, i eto ne defekt perenosa
+
+Chetyre gipotezy o forme grafa byli oprovergnuty BITOVO imenno potomu, chto forma verna.
+Menjalos JADRO. `ggml_vk_mul_mat` vybiraet ego po `dst->ne[1]`:
+
+    ne[1] == 1  -> mul_mat_vec_p021_f16_f32   (nash kq)    nakoplenie f32
+    ne[1] == 1  -> mul_mat_vec_nc_f16_f32     (nash kqv)   nakoplenie f32
+    inache      -> ggml_vk_mul_mat_q_f16      obshchij GEMM
+
+Uslovie `dst->ne[1] <= 8 && src1->ne[2]*ne[3] == 1` ne spasaet: u Q tretja os - eto golovy, ih 16.
+A obshchij GEMM po umolchaniju berjot f16acc-konvejer i perevodit src1 v f16 (pri
+integer_dot_product - voobshche v Q8_1). To est pri perehode s odnogo tokena na chetyre jadro
+vnimanija menjaetsja na menee tochnoe - i eto proishodit v ljubom prefille na Vulkan.
+
+**Ispravleno: `ggml_mul_mat_set_prec(kq/kqv, GGML_PREC_F32)` pri W > 1.**
+`ggml_vk_get_mul_mat_mat_pipeline` pri prec != GGML_PREC_DEFAULT berjot .f32acc, a dlja f16-vesa
+s f32-vhodom est otdelnyj pipeline_matmul_f16_f32.f32acc, tak chto i vhod ostajotsja f32.
+
+    hudshaja stroka pri K=4:  23,84% -> 6,89%
+    vremja prohoda:          148,77 -> 148,73 ms   (to est besplatno)
+
+## I GLAVNOE: perenos NE HUZHE shtatnogo puti. Kontrol nazval cifru
+
+    sloi karty pri SHIRINE 1 protiv chisto processornogo puti:  L2 5,5655%, token sovpal
+    sloi karty pri shirine 4:                                   L2 3,99..9,84%
+    tolko golova na karte (K=1..3, sloi na CPU):                L2 0,15..0,35%
+
+To est kartochnyj sloj VSEGDA rashoditsja s processorom na ~5%, i pri shirine 4 on rashoditsja
+tak zhe. **Znachit --gpu-static-width 4 goden po tomu zhe standartu, po kotoromu segodnja rabotaet
+--gpu-static-dense** - a on rabotaet i dajot 13,8 tok/s.
+
+Otsjuda i objasnenie tomu, chto tekst gemmy s kartoj i bez nejo rashoditsja posle trjoh tokenov:
+eto te zhe 5%, usilennye blizkoj nichjej. Ne oshibka - svojstvo.
+
+**PROEKCIJA MTP na izmerennom prohode:** 148,73 ms / 2,611 prinjatyh = 56,96 ms na token =
+**17,6 tok/s protiv nyneshnih 13,8, +27%.**
+
+Ogovorka, kotoruju nado skazat: spekuljativnoe dekodirovanie garantiruet "kachestvo ne
+menjaetsja" tolko esli prohod na K tokenov vosproizvodit posledovatelnye shagi TOCHNO. Na karte
+eto ne tak - ni pri shirine 4, ni pri shirine 1. To est MTP zdes budet "bystro i priblizitelno
+ekvivalentno", ровно v toj zhe mere, v kakoj takova sama karta.
+
+**Chto ostajotsja dlja MTP:** zagruzchik arhitektury gemma4-assistant (vesa uzhe skachany,
+D:/mtp/MTP/mtp-gemma-4-26B-A4B-it-Q8_0.gguf, 446 MB, razobran po tenzoram), svjaz chernovika s
+sushchestvujushchim dekoderom Leviathan/Chen (on uzhe est v dvizhke: build_verify, otbrakovochnaja
+vyborka, otkat kesha - no bеrjot chernoviki iz OTDELNOJ modeli, a MTP delit KV-kesh i skrytye
+sostojanija celi), i mesto na karte pod 446 MB.
