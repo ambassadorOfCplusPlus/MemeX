@@ -4979,3 +4979,59 @@ OBEDINENIJU naborov, a ne ostajotsja postojannoj.
 **To est nasha zhe optimizacija sela zapas MTP.** Eto ne paradoks, a arifmetika: spekuljativnoe
 dekodirovanie prodajot amortizaciju chtenija vesov, a my etu amortizaciju uzhe kupili drugim
 sposobom - i deshevle.
+
+## POL PERESECHENIJ RAZOBRAN, i dva moih vyvoda po njomu OPROVERGNUTY izmereniem
+
+Razlozhenie pereseчenija (gemma4, --gpu-static-dense, promt 256):
+
+    na odno peresechenie: vsego 0,946 ms = podjom 0,007 + ustrojstvo 0,934 + zabor 0,005
+
+To est **peresechenie eto na 99% vremja USTROJSTVA**, a ne nakladnye rashody hosta. Vsja linija
+"submit, fence, batching, timeline semaphores" k etim 10 ms otnoshenija ne imeet.
+
+**Rastjot li ono s kontekstom** (tri progona; progon s promtom 1024 vybroshen - tam skorost
+upala do 7,67 protiv 10,3, mashinu kto-to zanimal):
+
+    promt  128:  ustrojstvo 0,920 ms
+    promt  512:  0,953
+    promt 1900:  1,068
+    rost 0,148 ms na +14,5 MB KV-chtenija; 14,5 / 127 GB/s = 0,114 ms  =>  SOVPADAET
+    Znachit KV-chtenie chestno upiraetsja v polosu, i rastushchaja chast objasnena.
+
+**MOJA OSHIBKA ODIN: "karta platit ~30 mks za dispatch".** Eto bylo polucheno OSTATKOM: iz 0,934
+vychel bajty bolshih umnozhenij (0,32) i zapusk po 7,2 mks, a ostatok podelil na chislo melkih
+operacij. Ostatok ne izmerenie. Postavil klyuch MEMEX_NO_SOFTMAX=1, kotoryj ubiraet ODIN dispatch
+i sohranjaet formu (p = kq), dva progona na plecho:
+
+    26 dispatchej: ustrojstvo 0,929 i 0,927 ms
+    25 dispatchej: ustrojstvo 0,919 i 0,917 ms
+    =>  odin dispatch stoit 10 mks, a ne 30
+
+**MOJA OSHIBKA DVA: "slijanie melkih operacij dast +4..5%".** Iz 10 mks sleduet, chto
+flash-attention (tri dispatcha v odin) na 25 okonnyh slojah sekonomit 2 x 10 mks x 25 = **0,5 ms
+na token, +0,7%**. Za takoe kartochnyj put ne trogajut. Proverka po zhelezu zaodno: FA v Vulkan
+podderzhivaet golovy 64/80/96/112/128/192/256/576, to est 256 (25 okonnyh sloev) da, a 512
+(5 polnyh) net - no eto teper ne vazhno.
+
+## SDELANO: SUZHENIE CHTENIJA U OKONNYH SLOEV (MEMEX_SWA_NARROW)
+
+Eto to, chto v kommentarii k vyboru maski bylo nazvano "realnaja ekonomija i otdelnaja pravka".
+Dvadcat pjat sloev iz tridcati u gemma4 okonnye (1024 pozicii), a graf chital VES zanjatyj kesh i
+vybrasyval lishnee maskoj.
+
+Sdelano: u okonnyh sloev svoi vidy K i V so smeshcheniem (naceljivajutsja v set_step tam zhe, gde
+vidy zapisi) i SVOJ tenzor maski - potomu chto `ggml_soft_max_ext` trebuet
+`mask->ne[0] == a->ne[0]` TOCHNO, i proverjaet eto pri postroenii uzla. Nizhnjaja granica sreza
+okrugljaetsja vniz do 32 (dlina svjortki f16-matmula), lishnie do 31 pozicij zakryty maskoj.
+
+    kontekst 1900, --gpu-static-width 1, sverka s CHISTO PROCESSORNYM etalonom:
+                       L2       token     peresechenie   tok/s
+    bez suzhenija     7,2793%   SOVPAL      1,068 ms     10,30
+    s suzheniem       7,0540%   SOVPAL      0,998 ms     10,67   = +3,6%
+
+L2 dazhe uluchshilsja - men'she zamaskirovannyh strok, men'she shuma. Ekonomija 0,070 ms na
+peresechenie protiv predskazannyh po bajtam 0,046: lishnee ottogo, chto kq i softmax tozhe
+schitajut men'she.
+
+Po umolchaniju KLYUCH VYKLJUCHEN. Vygoda rastjot s kontekstom (pri 8192 dolzhno byt okolo +16%),
+i eto proverjaetsja progonom na 5500 tokenov.
