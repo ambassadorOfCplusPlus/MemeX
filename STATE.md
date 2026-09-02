@@ -5366,3 +5366,44 @@ razmeshchenie OZU+SSD s rabochim mnozhestvom po chastotam dokumenta.
 
 Zondy: MEMEX_EXPERT_COVERAGE (krivaja pokrytija + perenos vnutri dokumenta),
 MEMEX_EXPERT_DUMP=fajl (vygruzka schjotov dlja sravnenija tekstov), bench/ssd_raw_reads.py.
+
+### 6. STATIKA CODER NEXT NA KARTU: chto deshevo, a chto net (schitano po GGUF)
+
+Polzovatel predlozhil "statiku na vram". Razbor pokazal, chto statika chitaetsja POCHTI VSJA
+kazhdyj token - to est moja ocenka "~800 MB" byla vtroe zanizhena:
+
+    attn_qkv        641,7 MB  x36 sloev   delta-set
+    attn_gate       320,9 MB  x36         delta-set
+    ssm_out         320,9 MB  x36         delta-set
+    output          255,3 MB  x1          golova, chitaetsja celikom
+    attn_q/k/v/o    348,0 MB  x12         NASTOJASHCHEE vnimanie (12 iz 48 sloev)
+    ffn_gate_inp    201,3 MB  x48         marshrutizatory
+    ffn_*_shexp     160,4 MB  x48         OBSHCHIJ EKSPERT, chitaetsja vsegda
+    token_embd      330,6 MB  x1          odna stroka na token
+    ssm_conv1d/ba     7,2 MB  x36
+
+    na token chitaetsja 2,26 GB (vsjo krome embeddinga) => 91 ms iz OZU pri 24,8 GB/s
+
+Peresчjot tokena Coder Next:
+
+    statika iz OZU        91 ms      statika NA KARTE      17,8 ms (2,26 GB / 127 GB/s)
+    eksperty iz OZU       34         to zhe                34
+    promahi na SSD        29         to zhe                29
+    ITOGO                154 ms                            81 ms
+                    6,5 tok/s                          12,3 tok/s
+
+**Pochti vdvoe - predlozhenie polzovatelja silnee, chem ja snachala poschital.**
+
+**No granica chestnaja: 36 iz 48 sloev - DELTA-SET, i ejo na karte net vovse.** Kartochnyj put
+umeet vnimanie, plotnuju FFN i marshrutizator; delta-set eto gejted linejnoe vnimanie s matricej
+sostojanija - drugoj nabor operacij, i rabota tam bolshe, chem byla u gemmy.
+
+**Zato to, chto karta UZHE umeet, perenositsja bez novyh operacij:**
+
+    12 sloev vnimanija 348 MB + golova 255 + marshrutizatory 201 + obshchij ekspert 160
+    = 964 MB, to est 37% statiki
+    ekonomija 964 MB x (1/24,8 - 1/127) = ~31 ms na token
+    154 -> 123 ms  =>  8,1 tok/s vmesto 6,5
+
+To est plan raspadaetsja na dva shaga s raznoj cenoj: deshevyj (964 MB togo, chto karta umeet,
++1,6 tok/s) i dorogoj (delta-set na kartu, eshchjo +4,2 tok/s).
