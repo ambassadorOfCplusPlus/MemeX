@@ -4517,3 +4517,57 @@ Bezopasno po poriadku: kazhdyj graf pishet i chitaet tolko svoi pozicii n..n+K-1
 **Sostojanie: put ne verificirovan, vklyuchat nelzja.** Flag `--gpu-static-width` sushchestvuet i
 karta na njom ne padaet, no dajot drugoj otvet. Znachenie po umolchaniju 1, poetomu vsjo
 ostalnoe rabotaet kak ranshe.
+
+## NAJDEN REALNYJ DEFEKT: harness nikogda ne zapolnjal mask_swa i seq_ids
+
+`set_inputs` v harnesse (`--gen`) byl UREZANNOJ kopiej svobodnoj `set_graph_inputs`: zapolnjal
+tokeny, pozicii i `mask`, no NE `mask_swa` i NE `seq_ids`. U qwen3moe okonnoj maski net, poetomu
+defekt nikogda ne projavljalsja. **U gemma4 dvadcat pjat sloev iz tridcati chitajut imenno
+mask_swa** - i chitali to, chto ostalos v bufere.
+
+Priznak, kotoryj ja polnocha prinimal za oshibku v perenose kartochnogo sloja: **odinakovye
+progony davali to NaN, to konechnye no nevernye chisla.** Eto i byl neinicializirovannyj bufer.
+
+Ispravleno: lambda harnessa teper zovjot `set_graph_inputs` - tu samuju funkciju, kotoraja i byla
+sdelana svobodnoj so slovami "three callers need identical bytes". Posle etogo vsjo stalo
+determinirovannym: pereborka dajot bitovo te zhe cifry.
+
+**CHTO ETO ZNACHIT DLJA PROSHLYH CIFR.** Skorost - eto skorost: te zhe operacii nad temi zhe
+bajtami, poetomu 13,57 tok/s i vsja tablica bjudzheta tokena v sile. No **ljuboe utverzhdenie o
+KORREKTNOSTI gemma4, poluchennoe cherez vetku --gen, nedejstvitelno** - tam v okonnoj maske byl
+musor. Zondy "vse 0,0000%" byli polucheny odnorazovym sravneniem v main (ono zovjot
+set_graph_inputs), a ne harnessom, tak chto oni ostajutsja v sile. Qwen ne zatronut voobshche.
+
+## Kartochnyj sloj na K tokenov: gde ostanovilos
+
+Sverka vstroena v razvjortku: vtoroj graf toj zhe shiriny s gstat = nullptr, poelementno, v odnom
+processe. Kazhdaja stroka tablicy teper zaverjaet sebja sama (NaN/Inf/summa kvadratov) - bez etogo
+ja pol nochi pechatal otnoshenija, ne prochitav vyhod ni razu.
+
+**Kontrol pri shirine 1 - vot chto dalo otvet.** Karta protiv processora RASHODITSJA i pri shirine
+odin: attn_out-0 20,5%, logity 5,57%. Znachit takie chisla NORMALNY dlja karty (fused_rms_norm ne
+bitovo raven pare rms_norm+mul, kesh f16), i pravilnyj vopros - ne "nol li L2", a "to zhe li ono
+pri shirine 4":
+
+                  logity     stroka 0
+    shirina 1     5,57%      5,57%
+    shirina 4    10,91%      5,53%   <- stroka 0 SOVPALA s bazoj
+                             stroki 1..3: 23,71%, 5,64%, 10,38%
+
+**Stroka 0 verna, ostalnye degradirovali.** Po sobstvennomu razlichajushchemu pravilu eto maska,
+pozicii ili zapis v kesh - NE forma i ne perestanovka. Otdelno proverено i OPROVERGNUTO: `ggml_cont`
+vokrug trjoh perestanovok (kak v etalone) ne izmenil rezultat NI NA BIT, to est Vulkan neplotnyj
+istochnik obrabatyval verno.
+
+Vremja pri shirine 4 s kartoj: prohod 149,2 ms, 37,3 ms na token, otnoshenie 0,344.
+
+**Sostojanie: --gpu-static-width po umolchaniju 1, put ne verificirovan, vkljuchat nelzja.**
+Sledujushchij shag nazvan: stroki 1..3 - maska, pozicii ili zapis v kesh.
+
+### Instrumenty, dobavlennye za noch
+    MEMEX_SPEC_WIDTH=K   razvjortka ceny prohoda 1..K so samozaverkoj kazhdoj stroki
+    MEMEX_SPEC_ALLLOG=1  logity vseh strok (inache tolko poslednjaja)
+    MEMEX_SPEC_LOCATE=1  sravnenie zondov po imeni - nazyvaet stadiju i sloj
+    --gpu-static-width K shirina kartochnogo grafa sloja
+    bench/spec_width.ps1 (-NoCard dlja chistogo kontrolja), bench/mtp_overlap.ps1
+    bench/sleep_watchdog.ps1 + D:/MemeX/results/.no-sleep kak vykljuchatel
