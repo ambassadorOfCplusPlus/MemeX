@@ -5288,3 +5288,81 @@ kotoryj delalos MTP.
 
 Ispravljaju: proverka DO ljuboj mutacii, otdelnye zashchjolki na raznye prichiny, i otkaz
 set_step dolzhen byt fatalnym dlja shaga, a ne informacionnym.
+
+## PUNKT 4 PEREOTKRYT: ideja polzovatelja verna, moj otkaz byl neveren
+
+Ja zakryl punkt 4 slovami "predzagruzka nevozmozhna, D: eto HDD". Rasschjot byl na SLUCHAJNYH
+promahah. Polzovatel nastojal na drugoj postanovke - rabochee mnozhestvo, kotoroe sledit za
+tekstom, - i ona menjaet arifmetiku v sto raz. Nizhe vsjo izmerennoe.
+
+### 1. KONCENTRACIJA: verhnie eksperty berut pochti vsjo (gemma, promt 1900)
+
+    srez   8 iz 128 ( 6,2% modeli): pokrytie 42,04%, u hudshego sloja 33,39%
+    srez  32 iz 128 (25,0%):        84,43%,           75,69%
+    srez  64 iz 128 (50,0%):        97,30%,           94,66%
+    srez  96 iz 128 (75,0%):        99,76%,           99,26%
+
+### 2. MEZHDU TEKSTAMI PERENOS PLOH - staticheskij srez mjortv
+
+Srez vybran po tekstu A (Gutenberg) i primenjon k tekstu B (tehnicheskaja proza), 400 tokenov:
+
+    N      na svojom tekste   na chuzhom srezom A   sovpadenie verhnih N
+    32         80,27%              40,18%                37,81%
+    64         95,68%              62,12%                60,52%
+    96         99,67%              81,37%                81,08%
+
+18,6% promahov pri sreze 75% - eto 480 x 0,186 = 89 ekspertov na token, na HDD 2,1 s na token.
+**Vybrat srez odin raz i zamorozit ego nelzja.**
+
+### 3. VNUTRI DOKUMENTA PERENOS IDEALEN - rabochee mnozhestvo rabotaet
+
+Srez po PERVOJ polovine promta, primenjon k VTOROJ (gemma, 1900 tokenov):
+
+    srez  32: pervaja 82,30%, vtoraja 85,53%  (poterja -3,23 punkta)
+    srez  64: pervaja 96,59%, vtoraja 97,43%  (poterja -0,84)
+    srez  96: pervaja 99,70%, vtoraja 99,63%  (poterja +0,07)
+
+Poterja nulevaja ili OTRICATELNAJA. **Znachit hitryj predskazatel dlja etogo ne nuzhen: chastoty
+po prochitannomu dokumentu uzhe dajut pochti vsjo.** Cennost obuchaemoj modeli ostajotsja na
+HOLODNOM STARTE dokumenta i na smenah temy - eto gorazdo bolee uzkaja zadacha.
+
+### 4. SSD IZMEREN MIMO KESHA (FILE_FLAG_NO_BUFFERING, bench/ssd_raw_reads.py)
+
+    blok 1,67 MB: mediana 3,616 ms, p90 4,417, min 3,386   =>  0,46 GB/s
+    protiv HDD:   mediana 23,287 ms                        =>  0,07 GB/s
+    to est SSD bystree v 6,4 raza po zaderzhke
+
+    cena na token pri 480 ekspertah:  0,4% promahov -> 6,9 ms;  1,5% -> 26;  5% -> 87
+
+Bez NO_BUFFERING eto izmerit nelzja: na C: svobodno 20,5 GB pri 32 GB OZU, tak chto ljuboj
+fajl, kotoryj tuda vlezet, budet celikom v stranichnom keshe.
+
+### 5. RASKLADKA CODER NEXT (schitano po GGUF, a ne na glaz)
+
+    vsego 41,5 GB:  EKSPERTY 42,68 GB (94,3%),  STATIKA 2,59 GB (5,7%)
+    odin ekspert 1,737 MB, 512 na sloj, 48 sloev
+
+Polzovatel zametil verno: statiku predskazyvat NECHEGO - ona chitaetsja kazhdyj token, i ejo
+nado prosto zakrepit v OZU. Ona mala.
+
+    pri 28 GB pod kesh:  statika 2,59 zakreplena
+                         eksperty v OZU 25,41 GB = 59,5% vseh
+                         eksperty na SSD 17,27 GB (svobodno 20,5)
+
+    ocenka tokena:  statika iz OZU ~800 MB      32 ms
+                    rezidentnye eksperty 834 MB 34 ms
+                    promahi na SSD ~8 chtenij   29 ms
+                    ITOGO ~95 ms  =>  ~10,5 tok/s dlja modeli na 41,5 GB
+
+**TRI OGOVORKI, i pervaja sushchestvennaja.** Krivaja pokrytija izmerena na GEMME (128
+ekspertov, top-8), a u Coder Next ih 512 i top-10: pri bolshem chisle ekspertov raspredelenie
+obychno ploshche, i pokrytie pri teh zhe 59,5% mozhet okazatsja niže, a 29 ms prevratitsja v
+60-80. Eto nado merit NA SAMOJ MODELI. Vtoraja: dvizhok ne gonjaet qwen3next v vetke --gen
+(sostojanie delta-seti mezhdu shagami). Tretja: 17,27 iz 20,5 GB na SSD - zapasa malo.
+
+**Chto delat dalshe, po porjadku:** (1) perenos sostojanija delta-seti, chtoby Coder Next voobshche
+zapuskalsja v --gen; (2) krivaja pokrytija na njom zhe; (3) tolko posle etogo - dvuhurovnevoe
+razmeshchenie OZU+SSD s rabochim mnozhestvom po chastotam dokumenta.
+
+Zondy: MEMEX_EXPERT_COVERAGE (krivaja pokrytija + perenos vnutri dokumenta),
+MEMEX_EXPERT_DUMP=fajl (vygruzka schjotov dlja sravnenija tekstov), bench/ssd_raw_reads.py.
