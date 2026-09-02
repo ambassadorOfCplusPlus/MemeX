@@ -5074,3 +5074,35 @@ zapisi. Maska: slot s derzhit poziciju p_s = poslednjaja p <= n_past s p = s (mo
 dlja stroki r, esli p_s >= n_past + r - okno + 1. Host raskladki kolca ne znaet, poetomu masku
 okna dolzhna stroit KARTA - i eto proshche, chem nyneshnij srez hostovoj maski. Pri W == 1 zapis
 nikogda ne perehodit granicu kolca; dlja W > 1 nado libo dve kopii, libo otkaz.
+
+## SDELANO: KARTA BOLSHE NE UHODIT V PODKACHKU. Dlinnyj kontekst v 12,2 raza
+
+Dva ispravlenija, oba izmereny na kontekste 5500:
+
+    1. suzhenie chtenija okonnyh sloev (MEMEX_SWA_NARROW, po umolchaniju VKL)   0,581 -> 3,911
+    2. avtosnjatie golovy, kogda kesh s nej ne vlezaet v bjudzhet              3,911 -> 7,088
+                                                                              ITOGO x12,2
+
+Ruchnoj kontrol (--gpu-static-nohead) dal 7,280 - to est **avtomatika vosproizvodit ruchnoj
+optimum**. Peresechenie: 35,423 -> 4,653 -> 1,156 ms; 1,156 eto to zhe znachenie, chto na
+kontekste 1900, znachit podkachki net vovse.
+
+Na korotkom kontekste nichego ne izmenilos: golova ostajotsja (razmeshcheno 748,0 + nuzhno
+1772,1 + zapas 224 = 2744 < 3824), gemma 13,90 tok/s, plotnaja FFN +23,4%.
+
+**PO PUTI NAJDEN I ISPRAVLEN LATENTNYJ DEFEKT.** Podschjot bajtov sloev vynesen v `layer_bytes`,
+i teper on POSLOJNYJ. Byl po GLOBALNOJ geometrii (`cfg_.head_dim`, `cfg_.n_head_kv`), a u gemma4
+oknnye sloi eto 8 golov po 256, a polnye - 2 po 512, to est vdvoe men'she. Ocenka rashodilas s
+faktichjeskim razmeshcheniem, i ot nejo zavisit razbienie na bufery i proverka BAR-kuchi.
+
+**I ODIN UROK PRO INSTRUMENTY.** Pervaja versija proverki sprosila u drajvera, skolko svobodno, i
+molcha ne srabotala. Prichina vyjasnilas TOLKO potomu, chto pechat byla postavlena BEZUSLOVNO:
+`ggml_backend_vk_get_device_memory` vozvrashchaet **free == total == 3824 MiB**, to est ves objom
+ustrojstva, a ne ostatok. Proverka sravnivala s konstantoj i ne mogla srabotat nikogda. Teper
+schjot idjot po sobstvennomu uchjotu dvizhka (vram_bytes_ + need + zapas protiv bjudzheta).
+
+**Ostajotsja bolshim punktom: KOLCEVOE VYDELENIE kesha okonnyh sloev.** Ono osvobodilo by ~850 MB
+(1,15 -> 0,30 GB pri 5504) i pozvolilo by derzhat golovu NA MESTE na dlinnom kontekste, to est
+~7,1 tok/s stali by zametno vyshe, a pri 16k kesh zanjal by 0,51 GB vmesto 3,44 GB. Zamysel
+opisan vyshe; slozhnost v tom, chto upload_kv dolzhen remappit pozicii promta v kolco, i dlja V
+(transponirovannyj) eto nado delat cherez hostovyj staging, a ne pooperacionno.
