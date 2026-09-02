@@ -4711,3 +4711,41 @@ Napisan `bench/ssd_expert_reads.py`: sluchajnye chtenija bloka razmerom v odnogo
 fajla, ZAMETNO bolshego OZU (inache merjaetsja stranichnyj kesh, i skript govorit ob etom sam,
 esli polosa vyjdet vyshe 8 GB/s). Bez etogo chisla nelzja ni sprojektirovat predskazatel, ni
 skazat, na skolko tokenov vperjod nado smotret.
+
+## PUNKT 4 (predskazatel ekspertov s predzagruzkoj) ZAKRYT ZHELEZOM, a ne kodom
+
+Izmereno `bench/ssd_expert_reads.py`: sluchajnye chtenija bloka razmerom v odnogo eksperta
+(1,67 MB) iz fajla 41,5 GB, zametno bolshego OZU, to est chestno mimo stranichnogo kesha.
+
+    mediana 23,287 ms   p90 31,084   min 11,612   max 66,341   =>  0,07 GB/s
+
+Eto ne SSD. `Get-PhysicalDisk` podtverzhdaet: **D: - eto Seagate ST1000DM010, HDD 1 TB 7200
+ob/min.** SSD v sisteme odin - Crucial CT240BX500 na 224 GB, i eto C:. Vse modeli lezhat na
+mehanicheskom diske. (Polzovatel schital, chto Coder Next na SSD - eto ne tak.)
+
+**Pochemu eto zakryvaet zateju.** Na token qwen35moe chitaet 40 sloev x top-8 = 320 ekspertov
+po 2,58 MB (3 x 2048 x 512 pri Q6_K) = **826 MB na token**. Pri lyuboj dole promahov mimo OZU:
+
+    promahov  5%  ->  16 ekspertov x 23,3 ms =  373 ms na token  =  2,7 tok/s
+    promahov 10%  ->                            745 ms           =  1,3 tok/s
+    promahov 35%  ->                           2608 ms           =  0,4 tok/s
+
+Predskazanie ne pomogaet: chtoby sprjatat 23 ms, nado uspet vydat 320 chtenij za token, a eto
+7,4 s dискового vremeni na token dazhe pri IDEALNOM predskazanii. Diska prosto net.
+
+**Chto pomozhet vmesto etogo, v porjadke ceny:**
+  1. Sdelat tak, chtoby model VLEZALA. Rasklad protiv 31,9 GB OZU (svobodno pod kesh ~28):
+         Gemma Q4_K_XL          17,0 GB  vlezaet s zapasom - poetomu i rabotaet
+         Qwen Coder 30B Q6_K_XL 26,3 GB  vpritык, vlezaet
+         Qwen3.6-35B Q6_K       29,3 GB  NE vlezaet
+         Coder Next IQ3_XXS     28,5 GB  NE vlezaet
+         Coder Next IQ4_XS      41,5 GB  ne vlezaet sovsem
+     To est Coder Next nuzhen v kvante okolo 24-25 GB, i togda nikakoj predzagruzki ne nado.
+  2. Obrezka ekspertov (REAP i pod.): na HF est gotovye varianty vida ...-REAP-14B. Eto poterja
+     kachestva, no ona IZMERIMA, v otlichie ot podkachki s HDD, kotoraja ne rabotaet vovse.
+  3. SSD. Na C: svobodno 20,5 GB - hvataet tolko na gemmu, kotoroj eto i ne nuzhno. Diska pod
+     bolshie modeli net.
+
+**Vyvod, kotoryj stoit skazat prjamo: stroit umnyj predzagruzchik na etoj mashine nelzja.**
+Ne potomu chto slozhno, a potomu chto tselevoe ustrojstvo - HDD s 23 ms na sluchajnoe chtenie.
+Pravilnaja rabota v etom napravlenii - kvantovanie i obrezka ekspertov pod razmer OZU.
