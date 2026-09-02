@@ -5201,3 +5201,48 @@ Polovina tokena idjot na predele polosy OZU, i tam net zapasa. Chto ostajotsja:
 To est **korotkij promt u gemmy uprjotsja v pamjat, ne v dvizhok.** Vsjo, chto bylo v kode, uzhe
 sobrano: golova na karte (+25,5%), plotnaja FFN na karte (+23,4%), asinhronnyj promoushen,
 kolcevoj kesh. Dalneishij rost korotkogo promta pokupaetsja pamjatju ili kvantom, a ne kodom.
+
+## KARTA I PROCESSOR IDUT STROGO PO OCHEREDI. Skolko stoit perekrytie
+
+Polzovatel zametil, chto poloviny primerno ravny. Eto tak, i eto vazhno:
+
+    karta (sloi + golova)   35,0 ms
+    processor (eksperty)    36,0 ms
+    summa                   71,0 ms
+    izmerennyj token        71,7 ms      =>  PEREKRYTIJA NET VOOBSHCHE
+
+Pri polnom perekrytii token byl by max(35, 36) + ostatok ~ 36,7 ms, to est **27 tok/s vmesto
+13,9**. Eto vdvoe bolshe vsego, chto najdeno za den vmeste.
+
+**No bolshaja chast etogo nedostizhima, i zavisimost realnaja.** Vnutri sloja: karta schitaet
+vnimanie -> host po logitam marshrutizatora vybiraet ekspertov -> eksperty schitajutsja ->
+rezultat nuzhen karte dlja vnimanija SLEDUJUSHCHEGO sloja. Cherez granicu sloja poloviny
+perekryt nelzja.
+
+**Mest dlja parallelnosti ровно dva.**
+
+1. Rasshcheplenie samih EKSPERTOV mezhdu kartoj i processorom. Uzhe sdelano i rabotaet: u Kvina
+   `job_tok 18,84 / cpu_tok 10,78 / join_wait 10,91`. Dlja gemmy kod est (resident_split_ids), no
+   upirajetsja v videopamjat - izmereno vyshe, vtoroj kontekst Vulkan vidit bjudzhet
+   ischerpannym. Eto i est tot samyj x2, i on zablokirovan ZHELEZOM.
+
+2. Plotnaja FFN i marshrutiziruemye eksperty NEZAVISIMY: obe berut ffn_inp (odna cherez
+   ffn_norm, drugaja cherez pre_ffw_norm_2), rezultaty skladyvajutsja. Sejchas karta vozvrashchaet
+   plotnuju v tom zhe dispatch, chto i vnimanie, i potom prostaivaet, poka processor schitaet
+   ekspertov.
+
+**Cena vtorogo IZMERENA:**
+
+    plotnaja na karte:      peresechenie 0,950 ms, 37 uzlov, 26 dispatchej, 11,73 tok/s
+    plotnaja na processore: peresechenie 0,802 ms, 32 uzla,  21 dispatch,   9,39 tok/s
+    raznica: 0,148 ms na peresechenie = 4,44 ms na token
+
+To est perekrytie dalo by 71,7 -> 67,3 ms = **14,87 tok/s, +6,5%**.
+
+**NE SDELANO, i prichina nazvana.** Dlja etogo nado razbit kartochnyj sloj na dva grafa, sdelat
+submit plotnoj poloviny ASINHRONNYM (bez ozhidanija fence) i perenesti zabor za ekspertov. Eto
+perestrojka togo samogo pobajtovo vyverennogo puti, a propushchennyj fence dajot musor
+NEVOSPROIZVODIMO - rovno tot klass oshibki, kotoryj sjel etu noch (mask_swa). Za +6,5%, kotorye ne
+priblizhajut k 20 tok/s, takoj risk ne opravdan. Mehanizm dlja asinhronnogo submita v dvizhke est
+(ggml_backend_vk_batch_submit/reap, ispolzuetsja put ekspertov), tak chto rabota bounded - no ejo
+nado delat s toj zhe sverkoj po tokenam, chto i vsjo ostalnoe.
