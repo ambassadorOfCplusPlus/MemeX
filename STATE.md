@@ -4571,3 +4571,24 @@ Sledujushchij shag nazvan: stroki 1..3 - maska, pozicii ili zapis v kesh.
     --gpu-static-width K shirina kartochnogo grafa sloja
     bench/spec_width.ps1 (-NoCard dlja chistogo kontrolja), bench/mtp_overlap.ps1
     bench/sleep_watchdog.ps1 + D:/MemeX/results/.no-sleep kak vykljuchatel
+
+### Popravka k predydushchemu abzacu i GLAVNYJ vyvod ob etalone
+
+Shirina 2 dala stroku 0 = 12,24% i stroku 1 = 6,65%. Znachit "stroka 0 verna, ostalnye net" bylo
+SOVPADENIEM pri shirine 4, a ne priznakom: rashozhdenie rastjot s shirinoj i zadevaet vse stroki.
+Vyvod pro "masku, pozicii ili zapis v kesh" na etom osnovanii - snjat.
+
+**I tut vidno defekt v samoj postanovke, moj.** Ja vsju noch schital processornyj graf shiriny > 1
+ETALONOM. On ni chem ne vyveren: pri n_tokens > 1 ego gonjaet tolko prefill (a tam n_past = 0,
+to est net ni odnoj prochitannoj iz kesha pozicii) i `build_verify` spekuljativnogo dekodera,
+kotoryj sam nikogda ne proverjalsja protiv tokenov. Sravnivat kartu s nim - eto sravnivat dva
+neproverennyh puti i nazyvat raznicu oshibkoj odnogo iz nih.
+
+**Nastojashchij etalon nazvan i on samodostatochen: CHETYRE POSLEDOVATELNYH SHAGA po odnomu
+tokenu objazany dat te zhe logity, chto odin prohod na chetyre.** Eto ne tolko pravilnaja sverka -
+eto ROVNO to uslovie, na kotorom stoit spekuljativnoe dekodirovanie. Esli ono ne vypolnjaetsja,
+lomaetsja ne kartochnyj put, a vsja zateja.
+
+Poetomu sledujushchij shag - ne iskat dalshe v kartochnom vnimanii, a postroit etu sverku:
+K odinochnyh shagov protiv odnogo prohoda shiriny K, SNACHALA na chistom processornom puti
+(bez karty vovse). Ona skazhet, kotoryj iz dvuh putej voobshche neveren.
