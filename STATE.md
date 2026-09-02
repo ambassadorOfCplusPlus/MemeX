@@ -4592,3 +4592,59 @@ lomaetsja ne kartochnyj put, a vsja zateja.
 Poetomu sledujushchij shag - ne iskat dalshe v kartochnom vnimanii, a postroit etu sverku:
 K odinochnyh shagov protiv odnogo prohoda shiriny K, SNACHALA na chistom processornom puti
 (bez karty vovse). Ona skazhet, kotoryj iz dvuh putej voobshche neveren.
+
+## ETALON POSTROEN I ON ZAKRYL VOPROS: processornyj prohod na K tokenov TOCHEN
+
+`MEMEX_SPEC_SEQ=1` sravnivaet odin prohod shiriny K s K POSLEDOVATELNYMI shagami po odnomu
+tokenu. Odinochnyj shag - eto to, chem idjot vsja generacija i chem polucheny 13,89 tok/s,
+poetomu on i est etalon. I eto ROVNO uslovie, na kotorom stoit spekuljativnoe dekodirovanie.
+
+    processornyj put, K=2, K=3, K=4:  L2 0,0000% na KAZHDOJ stroke, vse tokeny sovpali
+
+Tri sledstvija srazu: (1) processornyj shirokij put veren, (2) znachit on zakonnyj etalon,
+(3) znachit rashozhdenie karty - ejo sobstvennaja oshibka, a ne "dva neproverennyh puti".
+
+**Cena prohoda teper zaverena** (net ni odnogo NEGODEN, vyhod tochen):
+    K=2 0,60..0,65     K=3 0,45..0,50     K=4 0,396 bez karty / 0,347-0,350 s kartoj
+    prohod K=4: 205,8 ms bez karty, 148,8-150,0 ms s kartoj => karta stoit ~57 ms na prohod
+
+Otsjuda proekcija MTP na izmerennyh chislah: 149 ms / 2,611 prinjatyh = 57,1 ms na token =
+**~17,5 tok/s protiv nyneshnih 13,89, +26%.**
+
+## Kartochnyj sloj pri shirine > 1: chto imenno ne tak
+
+**L2 - plohoj sudja, i ja merjal ne tem.** Karta rashoditsja s etalonom na 5,57% po L2 UZHE PRI
+SHIRINE 1 - kesh f16 i slitye normy dajut drugie poslednie bity. Dvizhok prinimaet kartu ne po L2,
+a po SOVPADENIJU TOKENOV (192/192 u Kvina). Po tokenam pri shirine 4:
+
+    stroka 0  L2  5,51%  token SOVPAL        otryv etalona 5,68
+    stroka 1  L2 23,84%  token SOVPAL        otryv etalona 3,30   <- L2 bolshoj, token vernyj
+    stroka 2  L2  5,65%  token RAZOSHELSJA   otryv etalona 0,98   <- edinstvennyj realnyj promah
+    stroka 3  L2 10,30%  token RAZOSHELSJA   otryv etalona 0,0011 <- blizkaja nichja, ne oshibka
+
+To est defekt UMERENNYJ i lokalizovannyj, a ne strukturnyj: strukturnaja oshibka formy slomala by
+vse chetyre tokena. Realnyj promah odin.
+
+**Oproverghuto bitovo (odinakovye do poslednego znaka L2), kazhdoe otdelnym A/B:**
+  1. `ggml_cont` vokrug trjoh perestanovok (kak v etalone) - NE menjaet nichego.
+  2. `ggml_fused_rms_norm` protiv pary rms_norm+mul (klyuch MEMEX_FUSED_NORM, 41 protiv 48 uzlov -
+     to est klyuch dejstvitelno rabotal) - NE menjaet nichego.
+  3. Golova na karte (--gpu-static-nohead, 0 uzlov 0 strok) - NE menjaet nichego.
+  4. Vyravnivanie strok maski po GGML_KQ_MASK_PAD - NE menjaet nichego.
+     (Trebovanie otnositsja k flash-attention; u soft_max_ext tolko mask->ne[1] >= a->ne[1].)
+
+**Sostojanie: --gpu-static-width po umolchaniju 1. Vkljuchat nelzja** - odin promah po tokenu iz
+chetyrjoh lomaet garantiju "kachestvo ne menjaetsja", na kotoroj stoit spekuljativka.
+
+## MOJA OSHIBKA, kotoraja stoila raboty: git checkout v chuzhom repozitorii
+
+Ves noch ja kommitil v repozitorij MemeX (C:/Users/User11/Desktop/MemeX), a dvizhok zhivjot v
+D:/MemeX/src/ik_llama.cpp - eto DRUGOJ repozitorij, i ego HEAD byl ot 7aa98245, do vsej nochnoj
+raboty. Kogda python-pravka upala na assert, ja sdelal `git checkout -- memex-fwd.cpp` - i sterjol
+vsjo, chto sdelal za noch v etom fajle, vklyuchaja ispravlenie maski.
+
+Vosstanovleno po tekstu iz perepiski i **srazu zakommicheno v repozitorij DVIZHKA**:
+    2137fe22 ispravlenie maski (mask_swa/seq_ids)
+    bb4527b6 izmeritel ceny prohoda + etalon
+Pravilo na budushchee: pered ljuboj pravkoj cherez skript - kommit v TOM repozitorii, kotoryj
+soderzhit fajl. `git checkout --` nikogda ne bezopasen, esli v etom repozitorii net kommita.
