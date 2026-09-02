@@ -4472,3 +4472,48 @@ Ranshe ja ocenival 19,5 po modeli; izmerenie dajot ~18, i eto chislo teper opira
 
 Razbros: povtornyj progon toj zhe konfiguracii dal K=4 178,3 -> 182,7 (2,5%), no K=6 279 -> 217
 (25%). **Shirinu 6 schitat ne izmerennoj**, K<=5 vosproizvodim.
+
+## Kartochnyj sloj na K tokenov: hod raboty (nochnaja avtonomnaja sessija)
+
+**Zachem** izmereno vyshe: bez perenosa MTP delaet huzhe (12,6 protiv 13,57), s perenosom ~18.
+
+**Chto sdelano.** `layer_width` v konfige GpuStatic i flag `--gpu-static-width K`. Vosem
+odnotokennyh mest vo vnimanii obobshcheny s VETVLENIEM po W, chtoby pri W == 1 sobiralsja tot zhe
+kod, chto do MTP - verificirovannyj put nelzja bylo pravit na meste:
+
+    reshape(q, hd, nh, 1)      -> W          reshape(k, hd, nkvh, 1)   -> W
+    reshape(v, hd, nkvh, 1)    -> W          Kc: reshape -> permute(0,2,1,3)
+    Vc: reshape -> permute(1,2,0,3)          Q:  reshape -> permute(0,2,1,3)
+    kdst/vdst: ekstent 1 -> W                kqv: reshape_2d -> cont_2d(permute)
+
+Plus: t_lx_/t_pos_/t_mask_ po shirine, maska strokami (ploskaja kopija tolko kogda stroka hosta
+rovno nasha), sklejka vyhoda PO VELICHINAM ([ostatok x W][ffn_norm x W][pre_ffw_norm_2 x W]
+[logity x W]) i takaja zhe narezka ggml_view_2d v grafe dekoda, pol bufera chtenija po sloju.
+
+**Vstroena SVERKA, i ona sdelala vsju rabotu.** V razvjortke shirin stroitsja VTOROJ graf toj zhe
+shiriny s gstat = nullptr, i logity sravnivajutsja poelementno v odnom processe na odnih vhodah.
+Bezopasno po poriadku: kazhdyj graf pishet i chitaet tolko svoi pozicii n..n+K-1 plus promt.
+
+**Chto ona pokazala, po poriadku - i eto zhurnal oshibok, a ne uspehov:**
+
+  1. Pervyj progon: "konechnyh 0 iz 1048576" - vsjo nekonechno. Zond skazal NE SVERENO vmesto
+     zeljonoj galochki, i eto edinstvennaja prichina, po kotoroj dalshe voobshche bylo chto iskat.
+  2. Vtoroj progon toj zhe komandy: konechno, no L2 25,58%. **Nevosproizvodimost mezhdu
+     odinakovymi progonami** - podpis chtenija neinicializirovannoj pamjati.
+  3. Gipoteza "kartochnyj KV pust" - OPROVERGNUTA: upload_kv stoit na 7407, do razvjortki.
+  4. Gipoteza "fail_msg_ otravljaet vsjo posle sebja" (do_layer zanuljaet vyhod i otvechaet
+     nuljami na VSJO, vklyuchaja golovu) - pravdopodobna po mehanizmu, no `failure()` PUST.
+  5. Postrochnaja sverka dala L2 = -1 na vseh strokah, chto znachit nulevoj ZNAMENATEL, to est
+     nulevoj ETALON. Pechat kazhdoj storony otdelno (summa kvadratov, NaN, Inf, nuli) - vot chto
+     nado bylo sdelat pervym: bez nejo "L2 -1" odinakovo vygljadit dlja "etalon nulevoj" i
+     "sravnivat nechego".
+  6. S MEMEX_SPEC_LOCATE zondy delajut NaN OBE storony - **lokalizator lomaet to, chto merit.**
+  7. **NAJDENA PRICHINA:** `graf sloja: 38 uzlov` pri shirine 4 - stolko zhe, skolko pri shirine 1.
+     Znachit `cfg_.layer_width` vnutri build_layer_graphs raven EDINICE, i karta schitaet odin
+     token tam, gde graf dekoda podajot chetyre. Pri etom `layer_width()` snaruzhi vozvrashchaet 4
+     (inache karta ne vzjalas by za K=4) - to est shirina doshla do ACCESSORA, no ne do
+     POSTROITELJA. Dobavlena samoidentifikacija `LAYER_WIDTH %d` v stderr (pravilo 68).
+
+**Sostojanie: put ne verificirovan, vklyuchat nelzja.** Flag `--gpu-static-width` sushchestvuet i
+karta na njom ne padaet, no dajot drugoj otvet. Znachenie po umolchaniju 1, poetomu vsjo
+ostalnoe rabotaet kak ranshe.
