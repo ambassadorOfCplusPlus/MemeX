@@ -4825,3 +4825,50 @@ zagruzchik chernovika MTP.
 **Instrumenty:** MEMEX_SPEC_WIDTH / _ALLLOG / _SEQ, MEMEX_MTP_OVERLAP, MEMEX_FUSED_NORM,
 --gpu-static-width; bench/spec_width.ps1 (-NoCard), bench/mtp_overlap.ps1,
 bench/ssd_expert_reads.py, bench/sleep_watchdog.ps1 (vykljuchatel: sozdat D:/MemeX/results/.no-sleep).
+
+## REGRESSII NET: 19,74 i 14,25 - RAZNYE MODELI I RAZNYJ TARGET
+
+Polzovatel sprosil, otkuda regressija s 19+ do 18,75. Otvet: nikakoj regressii net, a moj
+sobstvennyj "kontrolnyj progon Kvina" izmerjal ne to, chto ja dumal.
+
+`bench/promo_async_ab.ps1` gonjaet:
+    $MODEL = D:/Qwen3-Coder-30B-A3B-mx1.gguf         <- 16,5 GB, NE Q6_K_XL na 26,3 GB
+    $SNAP  = llama-memex-period-snap.exe             <- DRUGOJ target, ne llama-memex-fwd
+
+A ja, vzjav model iz spiska fajlov, progonjal Q6_K_XL cherez llama-memex-fwd. Eto dve raznye
+konfiguracii, i sravnivat ih chisla nelzja. Schjot po fajlam:
+
+    model            eksperty            SLOT (48 sloev)   emkost   popadanij   tok/s
+    mx1              vse iq4_xs             114,8 MiB      12-13    68-71%      18,3-19,7
+    Q6_K_XL          20 q8_0 + 124 q6_K     184,5 MiB      6        37-48%      13,1-14,3
+
+Chistyj A/B po ODNOMU razlichiju (tolko --no-ref, Q6_K_XL, tekushchij binarnik):
+    so ssylkoj  emkost 4, progrev 28,4%, 13,10 tok/s
+    --no-ref    emkost 6, progrev 37,4%, 14,25 tok/s      => ssylka stoit 1,15 tok/s
+I otdelno: bez --gpu-static-layers emkost 12 i popadanij 71%, no 9,60 tok/s. **Sloi na karte
+stojat gorazdo bolshe, chem ljubaja pribavka emkosti** - eto novoe izmerenie.
+
+**Chto iz etogo sleduet pro moi nochnye slova.** Ja skazal "u Kvina regressii net", opirajas na
+promo_async_ab. Eto ne bylo dokazatelstvom: skript gonjaet drugoj target na drugoj modeli.
+Regressiju nochnyh pravok na Kvine ja NE proverjal. Mehanizma dlja nejo net (u qwen3moe net
+okonnoj maski, sekcija pozicij odna, PREC_F32 stoit pod W>1), no eto rassuzhdenie, а не zamer.
+
+## NAJDEN DEFEKT OCENKI EMKOSTI: bpe_ beryotsja s NULEVOGO sloja
+
+`gpu_experts.cpp:712`:  `bpe_ = desc(0,0).slab + desc(0,1).slab + desc(0,2).slab;`
+`gpu_experts.cpp:736`:  `fits = budget / (n_layers * bpe_);`
+
+To est razmer eksperta beryotsja s odnogo sloja i umnozhaetsja na chislo sloev. U kvantov so
+SMESHANNOJ tochnostju eto neverno:
+
+    Q6_K_XL: sloj 0 = q8_0 (5,014 MB), ostalnye v osnovnom q6_K (3,871)
+             ocenka 48 x 5,014 = 240,7 MB   protiv nastojashchih 193,4 MB   => +42%
+             i v svobodnye 1956 MiB dvizhok pomeshchaet 6 slotov vmesto ~10
+
+    mx1:     vse sloi iq4_xs => ocenka po sloju 0 VERNA (poetomu 12-13 i rabotali)
+    gemma:   povyshennaja tochnost u POSLEDNEGO sloja (29: q5_K + q8_0), nulevoj tipichnyj
+             ocenka 99,3 MiB protiv nastojashchih 100,6 => -1%, bezopasno
+
+**Ispravlenie: summirovat po slojam, a ne umnozhat.** Zatragivaet tolko modeli so smeshannymi
+kvantami; dlja mx1 i gemmy nichego ne menjaet. Nado proverit, ne predpolagaet li raspredelitel
+odinakovyj razmer sloja pri adresacii slotov.
