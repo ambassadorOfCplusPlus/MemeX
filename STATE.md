@@ -4797,3 +4797,31 @@ D:/mtp/MTP/mtp-gemma-4-26B-A4B-it-Q8_0.gguf, 446 MB, razobran po tenzoram), svja
 sushchestvujushchim dekoderom Leviathan/Chen (on uzhe est v dvizhke: build_verify, otbrakovochnaja
 vyborka, otkat kesha - no bеrjot chernoviki iz OTDELNOJ modeli, a MTP delit KV-kesh i skrytye
 sostojanija celi), i mesto na karte pod 446 MB.
+
+## ITOG NOCHNOJ SESSII: cifry na utro
+
+    Gemma  13,95 tok/s  (bylo 13,57; plotnaja FFN na karte +23,3%, razbros 0,2% < effekta)
+    Kvin   18,28 tok/s  (za noch dal ot 18,22 do 18,95 - absoljut ne zakrepljon tochnee +-4%)
+    Qwen3.6-35B         RABOTAET: 6 iz 6 tokenov etalona, prefill v 4,0 raza bystree etalona
+
+**Sdelano:**
+  1. NAJDEN I ISPRAVLEN realnyj defekt: harness ne zapolnjal mask_swa i seq_ids (25 iz 30 sloev
+     gemma4 chitali musor iz bufera). On zhe byl prichinoj nevosproizvodimosti zamerov.
+  2. Kartochnyj sloj perenesjon na K tokenov (--gpu-static-width, po umolchaniju 1) i RAZOBRAN:
+     rashozhdenie pri W>1 - eto ne defekt perenosa, a smena jadra Vulkan; ispravleno PREC_F32,
+     hudshaja stroka 23,8 -> 6,9%; kontrol pri shirine 1 dajot te zhe 5,57%, to est perenos ne
+     huzhe togo, chto rabotaet segodnja.
+  3. Postroen NASTOJASHCHIJ etalon (K odinochnyh shagov protiv odnogo prohoda) - on pokazal, chto
+     processornyj shirokij put TOCHEN (L2 0,0000%), i tolko posle etogo stalo vozmozhno sudit kartu.
+  4. Qwen3.6-35B zapushchen: ispravlen mrope (chetyre pozicii na token).
+  5. MTP: chernovik skachan i razobran; perekrytie ekspertov izmereno; cena prohoda izmerena;
+     proekcija 17,6 tok/s (+27%) na izmerennyh chislah, a ne na modeli.
+  6. Punkt 4 (predzagruzka ekspertov) ZAKRYT ZHELEZOM: D: - eto HDD, 23,3 ms na sluchajnoe chtenie.
+
+**Ne sdelano i pochemu:** Coder Next (arhitektura qwen3next s delta-setju ne podklyuchena k
+--gen; i on ne vlezaet v OZU, a diska pod nego net); rezidentnyj nabor dlja qwen35moe; sam
+zagruzchik chernovika MTP.
+
+**Instrumenty:** MEMEX_SPEC_WIDTH / _ALLLOG / _SEQ, MEMEX_MTP_OVERLAP, MEMEX_FUSED_NORM,
+--gpu-static-width; bench/spec_width.ps1 (-NoCard), bench/mtp_overlap.ps1,
+bench/ssd_expert_reads.py, bench/sleep_watchdog.ps1 (vykljuchatel: sozdat D:/MemeX/results/.no-sleep).
