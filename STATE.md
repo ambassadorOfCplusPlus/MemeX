@@ -5149,3 +5149,55 @@ progonov, a ne regressija.
 
 **Pri 16k kesh zanjal by 0,51 GB vmesto 3,44** - to est dlinnyj kontekst iz nevozmozhnogo stal
 rabochim. Eto glavnyj rezultat sessii po prakticheskoj polze.
+
+## GEMMA S EKSPERTAMI NA KARTE: pochemu nelzja, s chislami
+
+Gemmu ni razu ne merjali s `--gpu-experts`: progony shli s `--resident 8`, a eto TOLKO hostovyj
+uchjot - sami eksperty po-prezhnemu chitalis iz OZU. Proverено.
+
+    slot eksperta gemmy: 107,4 MiB na 30 sloev (po sloju 3,717..4,832 MB, sloi RAZNOGO razmera)
+
+**Bez staticheskoj poloviny:** emkost 26, popadanij 54,6% - to est mesta na karte hvataet s
+izbytkom, i popadanija vysokie. No skorost 5,75 tok/s, potomu chto vnimanie, plotnaja FFN i
+golova ostajutsja na processore. Protiv 13,9 so staticheskoj polovinoj. **Staticheskaja polovina
+vyigryvaet v 2,4 raza** - eto teper izmereno, a ne predpolozheno.
+
+**So staticheskoj polovinoj** adaptivnyj shag vniz otrabotal tochno tak, kak pisalsja:
+
+    5 slotov: vlezli po vydeleniju, no kucha zapolnena (svobodno 0,0 iz nuzhnyh 128) -> 4
+    4 slota:  svobodno 9,3 iz 128   -> 3
+    3 slota:  svobodno 115,3 iz 128 -> 2
+    2 slota:  bufer 106,3 MiB <= 256 - sjadet v BAR-kuchu, chtenija upadut v sorok raz -> OTKAZ
+
+**Prichina najdena i ona arhitekturnaja:** `GpuExperts` podnimaet SVOJ kontekst Vulkan (dvizhok
+sam preduprezhdaet ob etom v kode). Odin kontekst spokojno derzhit 2785,1 MiB - eto izmereno na
+dlinnom kontekste s kolcom, - a vtoroj pri 2520 MiB u pervogo vidit bjudzhet ISCHERPANNYM.
+
+Chto by potrebovalos: chtoby GpuExperts rabotal na kontekste GpuStatic, a ne sozdaval svoj.
+Cena zatei pri etom nevysoka: dazhe esli by vljezli 3 slota, popadanij bylo by okolo 13%, to est
+0,13 x 33,6 = 4,4 ms iz 71,7 = **+7%**. Za obshchij kontekst Vulkan mezhdu dvumja podsistemami -
+ne stoit, poka est punkty deshevle.
+
+Proverennye i otvergnutye obmeny: otdat golovu pod eksperty (7 slotov, ~27% popadanij = 9,1 ms
+ekonomii, no poterja golovy stoit 24,9 ms - huzhe vtroe); otdat plotnuju FFN (5 slotov, ~20% =
+6,7 ms protiv poteri 16,6 - huzhe vdvoe).
+
+## KOROTKIJ PROMT U GEMMY: pochti u predela zheleza, i vot pochemu
+
+Token 71,7 ms razlozhen polnostju i kazhdaja chast izmerena:
+
+    processornye eksperty  36,0 ms  (50%)  - idut na 100% predela DDR4-2400 (24,8 GB/s izmereno)
+    kartochnye sloi        28,3 ms  (39%)  - bolshie umnozhenija po potolku 127 GB/s, dispatchi 10 mks
+    golova                  6,7 ms  (9%)   - 784 MB iz videopamjati
+    ostatok                 0,7 ms
+
+Polovina tokena idjot na predele polosy OZU, i tam net zapasa. Chto ostajotsja:
+
+  * perekvantovat ekspertov: gate_up q4_K -> iq4_xs i down q5_1 -> iq4_nl dajot 7,2% bajtov =
+    2,2 ms = **+3,2%**, i eto cena kachestva. Ne delal.
+  * bystree OZU: 2400 -> 3200 dajot processornoj polovine +33% polosy = -9 ms = **+14%**.
+    Eto edinstvennyj krupnyj rychag, i on ne v kode.
+
+To est **korotkij promt u gemmy uprjotsja v pamjat, ne v dvizhok.** Vsjo, chto bylo v kode, uzhe
+sobrano: golova na karte (+25,5%), plotnaja FFN na karte (+23,4%), asinhronnyj promoushen,
+kolcevoj kesh. Dalneishij rost korotkogo promta pokupaetsja pamjatju ili kvantom, a ne kodom.
