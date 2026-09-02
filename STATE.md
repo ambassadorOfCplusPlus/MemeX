@@ -4648,3 +4648,34 @@ Vosstanovleno po tekstu iz perepiski i **srazu zakommicheno v repozitorij DVIZHK
     bb4527b6 izmeritel ceny prohoda + etalon
 Pravilo na budushchee: pered ljuboj pravkoj cherez skript - kommit v TOM repozitorii, kotoryj
 soderzhit fajl. `git checkout --` nikogda ne bezopasen, esli v etom repozitorii net kommita.
+
+## SHTATNAJA KONFIGURACIJA GEMMY MENJAET TEKST, i eto nikto ne merjal
+
+Sravnenie posledovatelnostej tokenov, 24 tokena, greedy, odin i tot zhe promt:
+
+    s kartoj (--gpu-static-dense):  45518 107 101 2094 1816 563 506 ...
+    bez karty (chisto processor):   45518 107 101 1509 7412 611 735 ...
+    sovpalo podrjad s nachala: 3 iz 24
+
+Pochemu eto NE bylo zamecheno ranshe: sverka `MEMEX_SPEC_SEQ` peredavala etalonnomu grafu `gsp`,
+to est pri shirine 1 sravnivala **kartu s samoj soboj** - vsegda nol i nikakoj proverki. Ispravleno:
+etalon teper processornyj VSEGDA (gstat = nullptr). Posle etogo pri shirine 1 karta dajot TOT ZHE
+token (67289, otryv top-2 = 2,23) - to est karta obychno prava.
+
+**Vyvod: eto blizkaja nichja, a ne oshibka.** Karta rashoditsja s processorom v poslednih bitah
+(kesh f16, slitye normy), greedy usilivaet ljuboj perevoroten blizkoj nichji, i posle pervogo
+takogo sluchaja posledovatelnosti rashodjatsja navsegda. Sledstvie prakticheskoe: **sravnivat
+tekst gemmy s kartoj i bez nejo dalshe pervogo rashozhdenija bessmyslenno**, i ljubaja ocenka
+kachestva gemmy dolzhna delatsja v odnoj konfiguracii.
+
+## Modeli dlja sledujushchih shagov: chto est na diske
+
+    Qwen3.6-35B-A3B-UD-Q6_K      29,3 GB  qwen35moe  40 sloev, 256 ekspertov, top-8, n_embd 2048,
+                                          ekspert ffn 512 + OBSHCHIJ ekspert. Pri 32 GB OZU eto
+                                          uzhe rezhim "ne vlezaet" - to est baza dlja punkta 4.
+    Qwen3-Coder-Next-UD-IQ4_XS   41,5 GB  qwen3next  48 sloev, 512 ekspertov, top-10
+    Qwen3-Coder-Next-UD-IQ3_XXS  28,5 GB  to zhe, samyj malenkij CELYJ fajl
+    Qwen3-Coder-Next-Q4_K_S      12,6 MB  <<< BITAJA ZAKACHKA (dolzhno byt ~18 GB), ne ispolzovat
+
+`qwen3next` nesjot gejted-delta-set; u `qwen35moe` ona tozhe est ("Gated delta-net, qwen35moe
+only" v kommentarijah), i vetka --gen ejo ranshe ogranichivala - proverjaetsja progonom.
