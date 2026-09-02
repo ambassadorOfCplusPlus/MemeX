@@ -5035,3 +5035,42 @@ schitajut men'she.
 
 Po umolchaniju KLYUCH VYKLJUCHEN. Vygoda rastjot s kontekstom (pri 8192 dolzhno byt okolo +16%),
 i eto proverjaetsja progonom na 5500 tokenov.
+
+## DLINNYJ KONTEKST: gemma s kartoj byla NEPRIGODNA dalshe ~3000 tokenov
+
+Progon na 5500 tokenov vskryl to, chego na 256 i 1900 ne vidno. Kesh karty vydeljaetsja na POLNUJU
+shirinu dlja VSEH sloev, hotja 25 iz 30 smotrjat tolko na 1024 pozicii:
+
+    na poziciju: okonnye 200,0 KB + polnye 20,0 KB = 220,0 KB
+       1920 pozicij -> 0,40 GB      3000 -> 0,63 GB      5504 -> 1,15 GB      16384 -> 3,44 GB
+    esli okonnym slojam hranit tolko okno (1024): 210 MB fiksirovanno + 20 KB na poziciju
+       1920 -> 0,23 GB              5504 -> 0,30 GB      16384 -> 0,51 GB
+
+Pri 5536 pozicijah karta derzhit **3647,6 MiB iz 3824** - i drajver nachinaet podkladyvat
+sistemnuju pamjat, kotoraja v sorok raz medlennee.
+
+**Izmereno, tri sostojanija:**
+
+    kontekst 5500                        peresechenie   tok/s
+    bez suzhenija chtenija, golova na karte  35,423 ms    0,581
+    S SUZHENIEM,          golova na karte     4,653       3,911   <- v 6,7 raza
+    s suzheniem, golova SNJATA s karty        1,115       7,280   <- podkachki net vovse
+
+Tretja stroka - kontrol, i on podtverzhdaet diagnoz TOCHNO: pri 2899,6 MiB karta vlezaet, i
+peresechenie vozvrashchaetsja k 1,115 ms, to est k tomu zhe znacheniju, chto na kontekste 1900.
+Znachit vsja poterja byla v podkachke, a ne v bajtah.
+
+**Suzhenie chtenija vklyucheno po umolchaniju.** Na korotkom kontekste regressii net (13,90 tok/s,
+razbros 0,1%, plotnaja FFN +23,4%), na dlinnom - v 6,7 raza.
+
+**SLEDUJUSHCHEE I SAMOE CENNOE: OKONNOE VYDELENIE kesha.** Ono osvobodit ~850 MB (1,15 -> 0,30 GB
+pri 5504) i uberjot podkachku, NE otdavaja golovu: 3647,6 - 850 = 2798 MiB. To est ~7,3 tok/s pri
+5500 s golovoj na meste, protiv nyneshnih 3,9. A pri 16k kesh zanjal by 0,51 GB vmesto 3,44 - to
+est dlinnyj kontekst voobshche stal by vozmozhen.
+
+Zamysel: kolco na pad32(okno + W + 64) pozicij, zapis v slot (pozicija mod kolco), chtenie vsego
+kolca. Porjadok slotov ne vazhen - vnimanie eto summa po pozicijam, a rope uzhe primenjon pri
+zapisi. Maska: slot s derzhit poziciju p_s = poslednjaja p <= n_past s p = s (mod kolco); godna
+dlja stroki r, esli p_s >= n_past + r - okno + 1. Host raskladki kolca ne znaet, poetomu masku
+okna dolzhna stroit KARTA - i eto proshche, chem nyneshnij srez hostovoj maski. Pri W == 1 zapis
+nikogda ne perehodit granicu kolca; dlja W > 1 nado libo dve kopii, libo otkaz.
