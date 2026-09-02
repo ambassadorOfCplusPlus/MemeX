@@ -4894,3 +4894,63 @@ zamerom SO SSYLKOJ; s --no-ref bylo 16 i togda.
 **Chestnyj Kvin na segodnja: 19,80 tok/s (mx1, --no-ref, emkost 16).** Cifru 18,28 iz nochnyh
 zamerov nado chitat kak "mx1 cherez period-snap so ssylkoj", a 14,57 - kak "Q6_K_XL, drugaja
 model".
+
+## MTP IZMEREN CELIKOM, i moja proekcija +27% OPROVERGNUTA
+
+**Fork uzhe umeet MTP.** V njom est LLM_ARCH_GEMMA4_ASSISTANT i LLM_ARCH_GEMMA4_MTP,
+src/llama-spec-features.cpp, operacii MTP_OP_WARMUP/DRAFT_GEN/UPDATE_ACCEPTED, publichnyj API
+(llama_is_gemma4_mtp_file, llama_set_mtp_op_type, llama_spec_get_hidden_feature_view,
+llama_set_draft_input_hidden_state_copy, llama_spec_ckpt_*) i flag --spec-type mtp:n_max=K.
+Pisat zagruzchik i prjamoj prohod chernovika NE NADO - nado zvat. I, chto vazhnee, MTP mozhno
+BYLO IZMERIT do napisanija odnoj stroki svoego koda - chto i sdelano.
+
+Sobran llama-cli v dereve BEZ Vulkan (v build-vk on pytaetsja zakrepit hostovuju pamjat pod vsju
+model i upiraetsja v ErrorOutOfDeviceMemory; a dolja prijomki ot ustrojstva ne zavisit).
+Kontekst objazatelno ogranichit: po umolchaniju 262144 pozicii = KV-kesh na 59 GB.
+
+**DOLJA PRIJOMKI ZAVISIT OT TEKSTA, i eto glavnaja popravka:**
+
+    tekst                                n_max  raundov  chernovikov  prinjato   p
+    licenzija Gutenberga (nash promt)      1       44         44         18     0,409
+    tehnicheskaja proza (kontrol)          1       37         37         25     0,676
+
+To est 0,72 iz README unsloth pravdopodobny na obychnom tekste, a nizkoe chislo bylo svojstvom
+NASHEGO promta. Ljuboe utverzhdenie o MTP objazano nazyvat tekst.
+
+Model cepochki proverila sebja sama: pri p=0,409 dlja n_max=2 ona predskazyvaet 0,576 prinjatyh
+chernovikov na raund, izmereno 0,575. Pri n_max=4 izmereno 0,938 protiv predskazannyh 0,673 -
+prijomki KORRELIROVANY (raz chernovik popal v koleju, on v nej derzhitsja).
+
+    n_max   tokenov na raund (nash promt)
+      1           1,41
+      2           1,58
+      4           1,94
+
+**CENA CHERNOVIKA IZMERENA: 19,7-21,5 ms na chernovoj token** (728,196 ms / 37 i 943,967 / 44).
+Eto rovno 446 MB / 24,8 GB/s - to est chernovik chitaetsja IZ HOSTOVOJ OZU. Sovpadenie s
+raschjotom po bajtam do procenta.
+
+**PERESCHJOT PROEKCII na izmerennyh chislah** (p=0,676, prohod s kartoj: K=1 = 68,91 ms izmereno,
+K=4 = 148,73 izmereno, marginal 26,6 ms/token):
+
+    chernovikov   prohod   chernovik   prinjato   itog
+        1          95,5     +19,7        1,676    14,6 tok/s   protiv 13,95  = +4%
+        2         122,1     +39,4        2,13     13,2         = -5%
+        4         175,3     +78,8        2,65     10,4         = -25%
+
+    esli by chernovik byl REZIDENTNYM na karte (+3,4 ms vmesto +19,7):
+        1          95,5      +3,4        1,676    17,5 tok/s   = +26%
+
+**VYVOD: +27% trebujut 446 MB videopamjati, kotoryh u gemmy net.** Karta zanjata na 2527 MiB iz
+3824. Vyselit pod chernovik nechego: golova stoit 25,5%, plotnaja FFN 23,3% - kazhdaja dorozhe,
+chem daet MTP. Proverjal i kombinaciju "plotnaja FFN na host, chernovik na kartu": 14,5 tok/s,
+to est ne stoit togo.
+
+**S chernovikom na hoste MTP daet +4%** - eto realno, no eto ne to, za chto stoit brat na sebja
+otkat KV i otbrakovochnuju vyborku v nashem dvizhke. **Zapreshchajushchij resurs - VIDEOPAMJAT, a
+ne kod.**
+
+Chto iz etogo sleduet dlja prioritetov: rabota po MTP osmyslenna tolko posle togo, kak na karte
+najdjotsja 446 MB - to est posle sokrashchenija golovy ili plotnoj poloviny. Pervyj kandidat -
+golova: 748 MiB pri q8_0, a v q6_K ona zanjala by 578 MiB, osvobodiv 170. Etogo malo. Vtoroj -
+perekvantovat down_exps (q5_1 -> iq4_nl), no eto ekonomija HOSTOVOGO chtenija, a ne videopamjati.
