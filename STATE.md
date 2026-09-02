@@ -4872,3 +4872,25 @@ SMESHANNOJ tochnostju eto neverno:
 **Ispravlenie: summirovat po slojam, a ne umnozhat.** Zatragivaet tolko modeli so smeshannymi
 kvantami; dlja mx1 i gemmy nichego ne menjaet. Nado proverit, ne predpolagaet li raspredelitel
 odinakovyj razmer sloja pri adresacii slotov.
+
+### ISPRAVLENO i IZMERENO: razmer slota - summa po slojam
+
+`bpe_` teper maksimum po slojam (dlja stejdzhinga i gruppirovki), `bpe_min_` - minimum (dlja
+chestnoj proverki BAR-kuchi), a novoe `slot_bytes_` - SUMMA, i imenno ona idjot v ocenku emkosti.
+Razmeshchenie pravit ne nado: tenzory i tak sozdajutsja s desc(il,k).type, to est kazhdyj sloj
+uzhe zanimaet svojo. Dobavlena samoidentifikacija - dvizhok pechataet slot i govorit, odnorodny
+sloi ili net.
+
+    model      slot        sloi                emkost    progrev    tok/s
+    Q6_K_XL    184,5 MiB   RAZNOGO razmera     6 -> 8    37,4->44,4  14,25 -> 14,57
+    mx1        114,8 MiB   odnorodny           16        62,2        19,80
+
+Slot sovpal s raschjotom po fajlu do desjatoj doli v oboih sluchajah - eto sverka, a ne podgonka.
+
+**19,74 VOSPROIZVEDENO: mx1 na tekushchem binarnike dajot 19,80 tok/s pri emkosti 16.**
+Regressii net, i teper eto izmereno, a ne vyvedeno. Zapisannye ranshe "12-13 slotov" byli
+zamerom SO SSYLKOJ; s --no-ref bylo 16 i togda.
+
+**Chestnyj Kvin na segodnja: 19,80 tok/s (mx1, --no-ref, emkost 16).** Cifru 18,28 iz nochnyh
+zamerov nado chitat kak "mx1 cherez period-snap so ssylkoj", a 14,57 - kak "Q6_K_XL, drugaja
+model".
