@@ -5106,3 +5106,46 @@ schjot idjot po sobstvennomu uchjotu dvizhka (vram_bytes_ + need + zapas protiv 
 ~7,1 tok/s stali by zametno vyshe, a pri 16k kesh zanjal by 0,51 GB vmesto 3,44 GB. Zamysel
 opisan vyshe; slozhnost v tom, chto upload_kv dolzhen remappit pozicii promta v kolco, i dlja V
 (transponirovannyj) eto nado delat cherez hostovyj staging, a ne pooperacionno.
+
+## SDELANO: KOLCEVOJ KESH OKONNYH SLOEV. Dlinnyj kontekst v 16,3 raza
+
+Okonnomu sloju nikogda ne nuzhno bolshe okna pozicij - znachit i hranit bolshe ne nado.
+`MEMEX_SWA_RING` (po umolchaniju VKL): kesh okonnyh sloev vydeljaetsja na `pad32(okno + W + 64)`
+pozicij, slot pozicii p est `p % ring`, chtenie idjot po VSEMU kolcu.
+
+Porjadok slotov ne vazhen: vnimanie eto summa po pozicijam, a rope primenjon pri ZAPISI, to est
+pozicija zashita v samih znachenijah. Vazhno tolko znat, kakaja pozicija v kakom slote - i eto
+znaet KARTA, a ne host, poetomu **masku kolca stroit karta**: slot s derzhit poziciju
+`B - ((B - s) mod ring)`, gde B - novejshaja zapisannaja pozicija; slot goden dlja stroki, esli
+ego pozicija ne iz budushchego i ne vypala iz okna. Hostovaja maska indeksirovana pozicijami i
+zdes byla by NEVERNA.
+
+Promt perekladyvaetsja v kolco dvumja memcpy na stroku (nepreryvnyj diapazon pozicij perehodit v
+nepreryvnyj diapazon slotov s odnim perehodom cherez granicu), sobiraetsja v hostovom bufere i
+otdajotsja odnim vyzovom na tenzor - pooperacionnaja zagruzka dala by desjatki tysjach vyzovov.
+
+**SVERKA.** Kontekst 1900 (n_kv_max 1920, kolco 1120 - perehod cherez granicu zadejstvovan),
+protiv CHISTO PROCESSORNOGO etalona:
+    bez kolca: L2 7,0540%, token SOVPAL, karta 2870,7 MiB, 10,59 tok/s
+    s kolcom:  L2 7,0473%, token SOVPAL, karta 2714,5 MiB, 10,49 tok/s
+Ekonomija 156 MiB = 25 sloev x 8192 B x 800 pozicij - sovpadaet s raschjotom.
+
+**DLINNYJ KONTEKST (5500), ves hod za sessiju:**
+
+    nachalo (polnyj kesh, bez suzhenija)                        0,581 tok/s
+    + suzhenie chtenija okonnyh sloev                          3,911
+    + avtosnjatie golovy pri perepolnenii                      7,088
+    + KOLCEVOJ KESH (golova ostajotsja na meste)               9,466
+                                                        ITOGO  x16,3
+
+Pri kolce: kesh 1120 pozicij vmesto 5536, nuzhno 2037,1 MiB vmesto 2899,6, karta derzhit 2785,1
+vmesto 3647,6 - to est 748 + 2037 + 224 = 3009 < 3824, i GOLOVA NE SNIMAETSJA. Peresechenie
+1,098 ms, to est podkachki net.
+
+**Korotkij kontekst ne zatronut, i eto dokazano, a ne izmereno:** pri n_kv_max <= kolca ring
+otklyuchaetsja SAM, i v logе stoit `SWA_RING 0 razmer 0`. Karta derzhit te zhe 2527,0 MiB.
+Gemma 13,55 tok/s pri razbrose 1,4% - polosa za sessiju 13,55..13,95 (2,9%), to est razbros
+progonov, a ne regressija.
+
+**Pri 16k kesh zanjal by 0,51 GB vmesto 3,44** - to est dlinnyj kontekst iz nevozmozhnogo stal
+rabochim. Eto glavnyj rezultat sessii po prakticheskoj polze.
