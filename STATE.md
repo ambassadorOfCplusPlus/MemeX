@@ -4954,3 +4954,28 @@ Chto iz etogo sleduet dlja prioritetov: rabota po MTP osmyslenna tolko posle tog
 najdjotsja 446 MB - to est posle sokrashchenija golovy ili plotnoj poloviny. Pervyj kandidat -
 golova: 748 MiB pri q8_0, a v q6_K ona zanjala by 578 MiB, osvobodiv 170. Etogo malo. Vtoroj -
 perekvantovat down_exps (q5_1 -> iq4_nl), no eto ekonomija HOSTOVOGO chtenija, a ne videopamjati.
+
+### METOD PROEKCII PROVEREN NEZAVISIMO, i on dal strukturnyj vyvod
+
+Sam fork na kontrolnom tekste: **s MTP (n_max=1) 8,27 tok/s, bez MTP 7,06 => x1,171.**
+Moja model predskazala 8,01 (oshibka 3%). Razlozhenie sxoditsja:
+    izmereno: 7743,44 ms / 37 raundov = 209,3 ms na raund, 64/37 = 1,73 tokena na raund
+    chernovik 19,7 ms  =>  prohod na 2 tokena = 189,6 ms
+    odinochnyj token = 141,67 ms  =>  vtoroj token stoit 0,338 pervogo
+U nas to zhe otnoshenie: marginal 26,6 na baze 68,91 = 0,386. **Forma modeli podtverzhdena drugoj
+realizaciej na drugom zhelezе.**
+
+Utochnjonnaja proekcija dlja nashego dvizhka (1,73 tokena na raund, izmereno):
+    chernovik na hoste (+19,7 ms):  115,2 / 1,73 = 66,6 ms  =>  15,0 tok/s   = +7,6%
+    chernovik na karte (+3,4 ms):    98,9 / 1,73 = 57,2 ms  =>  17,5 tok/s   = +25%
+
+**STRUKTURNYJ VYVOD.** Fork poluchaet +17% potomu, chto ego odinochnyj token celikom upiraetsja v
+chtenie vesov iz OZU: 141,67 ms na token, vsjo iz hostovoj pamjati. Nash dvizhok eti chtenija UZHE
+perenjos v videopamjat (vnimanie, KV, marshrutizatory, plotnaja FFN, golova - 2527 MiB), poetomu
+amortizirovat pochti nechego: nash odinochnyj token 68,91 ms, i iz nego na hostovoe chtenie
+prihoditsja tolko ekspertnaja polovina, kotoraja pri prohode na K tokenov rastjot po
+OBEDINENIJU naborov, a ne ostajotsja postojannoj.
+
+**To est nasha zhe optimizacija sela zapas MTP.** Eto ne paradoks, a arifmetika: spekuljativnoe
+dekodirovanie prodajot amortizaciju chtenija vesov, a my etu amortizaciju uzhe kupili drugim
+sposobom - i deshevle.
