@@ -4679,3 +4679,35 @@ kachestva gemmy dolzhna delatsja v odnoj konfiguracii.
 
 `qwen3next` nesjot gejted-delta-set; u `qwen35moe` ona tozhe est ("Gated delta-net, qwen35moe
 only" v kommentarijah), i vetka --gen ejo ranshe ogranichivala - proverjaetsja progonom.
+
+## Qwen3.6-35B-A3B (qwen35moe): chto vyjasnilos pri pervom zapuske
+
+Dvizhok model CHITAET i znaet ejo geometriju polnostju:
+
+    40 sloev, n_embd 2048, golovy 16/2 po 256, rope 64 iz 256 @ 1e+07
+    256 ekspertov, top-8, shirina eksperta 512, plus OBSHCHIJ ekspert
+    tolko 10 sloev nastojashchego vnimanija (3, 7, 11, ... 39)
+    ostalnye 30 - DELTA-SET, sostojanie 548864 f32 = 2,20 MB na sloj
+
+To est u nejo tri chetverti sloev - linejnoe vnimanie s sostojaniem, a ne KV-kesh. Eto menjaet
+vsju arifmetiku: KV-kesha pochti net, zato est 30 x 2,2 = 66 MB sostojanija, kotoroe zhivjot
+mezhdu shagami.
+
+**Dva otkaza, oba osmyslennye i oba nazvany dvizhkom:**
+  1. `--resident/--gpu-experts poka tolko dlja qwen3moe` - rezidentnyj nabor ekspertov k
+     qwen35moe ne podklyuchjon. Eto rabota, i ona nebolshaja: geometrija uzhe chitaetsja.
+  2. `--gen poka tolko dlja qwen3moe i gemma4: u qwen35moe delta-set, i ejo sostojanie mezhdu
+     shagami...` - i dvizhok srazu ukazyvaet pravilnyj put: `--decode-check N`, kotoryj i
+     generiruet, i sverjaet KAZHDYJ shag s llama_decode. Dlja delta-seti eto edinstvennyj
+     chestnyj sposob: sostojanie nakaplivaetsja, i oshibka na shage 2 ne vidna v logitah shaga 2,
+     zato portit shag 5.
+
+**Rezhim pamjati.** 29,3 GB modeli pri 32 GB OZU - eto uzhe "ne vlezaet": chast ekspertov kazhdyj
+token pridjot s diska cherez stranichnyj kesh. Poetomu imenno eta model - pravilnaja baza dlja
+punkta 4 (predskazatel ekspertov s predzagruzkoj), a ne Coder Next: Coder Next na 41,5 GB budet
+promahivatsja tak chasto, chto tam ne vidno budet nichego, krome diska.
+
+Napisan `bench/ssd_expert_reads.py`: sluchajnye chtenija bloka razmerom v odnogo eksperta iz
+fajla, ZAMETNO bolshego OZU (inache merjaetsja stranichnyj kesh, i skript govorit ob etom sam,
+esli polosa vyjdet vyshe 8 GB/s). Bez etogo chisla nelzja ni sprojektirovat predskazatel, ni
+skazat, na skolko tokenov vperjod nado smotret.
