@@ -5880,3 +5880,181 @@ poetomu A/B delaetsja chereduja plechi.
   `rdec`/`spec_width`/`spec_one` + qwen35moe ne vyzyvalis: do nih ne dopuskajut ohrany po
   imeni arhitektury, stojashchie vyshe, i chtoby uvidet stroku otkaza, nado snachala snjat ih.
 - Sdvig L2 u qwen3next ne razobran po slojam (sm. vyshe) - eto glavnoe iz nesdelannogo.
+
+---
+
+## Shag 3a: nedostajushchie operacii Vulkan dlja dekoda gejted delta-seti
+
+Data: 3 sentjabrja 2026. Derevo `D:\MemeX\src\ik_llama.cpp`, kommity `676298ba` i `c45d8533`.
+Pravleny tolko `ggml/src/ggml-vulkan.cpp`, `ggml/src/vulkan-shaders/**`, `tests/**`.
+
+Razdel 8 HANDOFF_ROUTER.md govoril: "Delta-set na kartu. U Vulkan **net ni odnoj** nuzhnoj
+operacii". Teper est vse chetyre, i kazhdaja svepena s CPU na formah samoj modeli.
+
+### Chto sdelano i dlja kakih form
+
+| operacija | shejder | forma, na kotoroj svereno | dlja chego eshchjo godna |
+|---|---|---|---|
+| `GGML_OP_SSM_CONV` | `ssm_conv.comp` (novyj) | d_conv 4, d_inner 8192, 1 token, 1 posledovatelnost | ljuboe chislo tokenov, d_conv do 8 |
+| `GGML_OP_DELTA_NET` | `delta_net.comp` (novyj) | S 128, 16 K-golov, 32 V-golovy, oba `repeat_type`, 1 token | head_dim 64 i 128, tolko odin token i odna posledovatelnost |
+| `GGML_UNARY_OP_SOFTPLUS` | `softplus.comp` (novyj) | [128,10,10,10] i [7,13,19,23] | ljubaja nepreryvnaja f32/f16 |
+| `GGML_UNARY_OP_EXP` | `exp.comp` (novyj) | to zhe | to zhe |
+| `GGML_OP_L2_NORM` | `l2_norm.comp` (byl, ispravlen) | [128,16,1,1] i [128,32,1,1], eps 1e-6 | ljubaja nepreryvnaja f32 |
+
+`eps` 1e-6 vzjat ne iz doki, a iz samogo fajla:
+`qwen3next.attention.layer_norm_rms_epsilon = 9.999999974752427e-07` (gguf-py).
+
+### Dva mesta, gde "rabotajushchij, no nevernyj" put byl vozmozhen
+
+**1. U DELTA_NET v dereve DVE raznye formuly, i sverka legko sravnila by ne to s ne tem.**
+Skaljarnyj put `ggml_compute_forward_delta_net_f32` (ggml.c) DOPOLNITELNO L2-normiruet q i k
+vnutri operacii; jadro `iqk_fused_delta_net` (iqk_mul_mat.cpp) - NET, ono zhdjot uzhe
+normirovannye. CPU vybiraet mezhdu nimi PO head_dim: 64 i 128 idut cherez iqk, vsjo ostalnoe -
+v skaljarnyj otkat. Na normirovannom vhode raznicy net, na proizvolnom - est. Shejder povtorjaet
+iqk, poetomu `supports_op` propuskaet **tolko head_dim 64 i 128**. Proverjeno zamerom:
+head_dim 96 pechataetsja kak `not supported [Vulkan0]` i schitaetsja na CPU.
+
+**2. U L2_NORM shejder ogranichival ne to, chto CPU.** Bylo
+`inversesqrt(max(sum, eps))` - eto `1/max(sqrt(sum), sqrt(eps))`, a CPU delaet
+`1/max(sqrt(sum), eps)`. Pri eps 1e-6 porog byl **1e-3, v tysjachu raz vyshe**. Na strokah
+normalnoj velichiny eps ne srabatyvaet vovse, tak chto rashozhdenie prosnulos by tolko na pochti
+nulevoj stroke - i vygljadelo by kak oshibka vychislenija, a ne kak drugoj porog. Ispravleno.
+
+### Rezultaty sverki s CPU
+
+`test-backend-ops test -b Vulkan0 -o <OP>`, porog - NMSE, pechataetsja samim testom pri
+prevyshenii. Porog po umolchaniju **1e-7**; u DELTA_NET podnjat do **1e-6** (128 slagaemyh na
+skaljarnoe proizvedenie plus drevesnaja summa v shejdere protiv posledovatelnoj u CPU).
+Ni odin sluchaj porog ne prevysil - v vyvode net ni odnoj stroki NMSE.
+
+    L2_NORM   [128,16,1,1] eps 1e-6                                    OK
+    L2_NORM   [128,32,1,1] eps 1e-6                                    OK
+    L2_NORM   [64,10,10,10] eps 1e-6                                   OK
+    SOFTPLUS  [128,10,10,10] i [7,13,19,23], vhod v [-150,150]         OK
+    EXP       to zhe                                                   OK
+    SSM_CONV  d_conv 4, d_inner 8192, 1 token                          OK
+    SSM_CONV  d_conv 4, d_inner 8192, 4 tokena                         OK
+    SSM_CONV  d_conv 4, d_inner 128,  1 token                          OK
+    DELTA_NET S 128 Hk 16 Hv 32 repeat_type 0, 1 shag                  OK
+    DELTA_NET S 128 Hk 16 Hv 32 repeat_type 1, 1 shag                  OK
+    DELTA_NET to zhe pri g v [-1,1] (decay > 1)                        OK
+    DELTA_NET S 128 Hk 16 Hv 32 repeat_type 0, 16 SHAGOV PODRJAD       OK
+    DELTA_NET S 128 Hk 16 Hv 32 repeat_type 1, 16 SHAGOV PODRJAD       OK
+    DELTA_NET S 64  Hk 8  Hv 16 repeat_type 0, 1 shag                  OK
+    1466/1466 tests passed pri kazhdom filtre
+
+**Nakoplenie sostojanija za 16 shagov proverjeno.** Sluchaj `steps=16` svjazyvaet shestnadcat
+vyzovov cepochkoj: sostojanie sledujushchego shaga - vid na hvost rezultata predydushchego, u
+kazhdogo shaga svoi q, k, v, g, beta. Poslednij uzel nesjot 16 posledovatelnyh obnovlenij
+sostojanija, i on sovpal s CPU v predelah togo zhe poroga 1e-6. Zatuhanie `g` v etom sluchae
+bereotsja otricatelnym, kak v modeli (ssm_a v fajle otricatelen): pri g > 0 za 16 shagov
+sostojanie ushlo by v ogranichitel +-1e6, i sverka mjerila by sovpadenie ogranichitelej.
+
+### Otkazy - vyzvany, a ne objavleny
+
+    DELTA_NET head_dim 96                    not supported [Vulkan0]
+    DELTA_NET n_tokens 4                     not supported [Vulkan0]
+    SSM_CONV  dve posledovatelnosti          not supported [Vulkan0]
+    SOFTPLUS / EXP na nenepreryvnom vide     not supported [Vulkan0]
+
+Vse ostalnye neohvachennye sluchai (`saved_steps` u oboih, put KDA s zatuhaniem na kazhdyj
+stolbec) otkazany tem zhe `supports_op`, no **ne vyzvany zamerom** - dlja nih v test-backend-ops
+net postroitelja.
+
+### Vremena, karta RX 6500 XT (`test-backend-ops perf -b Vulkan0`)
+
+    SSM_CONV  8192 kanalov, 1 token          3,67 mks    108 GB/s
+    SSM_CONV  8192 kanalov, 4 tokena         5,53 mks    105 GB/s
+    DELTA_NET S 128, 32 golovy, 1 token     42,5  mks     93 GB/s   (oba repeat_type)
+    DELTA_NET S 64,  16 golov,  1 token     17,0  mks     29 GB/s
+    L2_NORM   [128,16]                       2,26 mks
+    L2_NORM   [128,32]                       3,22 mks
+    SOFTPLUS  [128,10,10,10]                 4,66 mks    205 GB/s
+    EXP       [128,10,10,10]                 4,60 mks    207 GB/s
+
+**Sloj delta-seti celikom: okolo 53 mks vychislenij** (svjortka 3,67 + softplus ~2 + dve
+l2-normy 2,26+2,26 + delta-set 42,5) **plus okolo 50 mks nakladnyh** pri pjati dispatchah po
+izmerennym ranee 10 mks (razdel 1, zdes NE peremerjano). Itogo ~103 mks na sloj, 36 sloev -
+**~3,7 ms na token**. Eto edinicy-desjatki mikrosekund na dispatch, kak i ozhidalos; sotni ne
+poluchilos.
+
+**Chetyre pjatyh etogo vremeni - odna operacija, i ona uprjotsja v pamjat, a ne v arifmetiku.**
+Sostojanie 2 MiB na sloj chitaetsja DVAZHDY i pishetsja odin raz: v' i out trebujut vseh
+stolbcov do togo, kak stanet izvesten v_new, a 64 KiB na golovu v obshchuju pamjat rabochej
+gruppy ne ljagut - drajver zajavljaet predel 32768 bajt (stroka `shared memory: 32768` v
+zagolovke progona). Shest MiB za 42,5 mks - eto 148 GB/s, vyshe izmerennogo potolka VRAM
+127-131 GB/s, to est vtoroe chtenie idjot iz kesha karty i pochti besplatno. Ubirat ego
+smysla net.
+
+**Vazhno pro eti chisla:** rezhim `perf` shljot vosem tysjach dispatchej odnim buferom komand,
+poetomu processornaja stoimost otpravki v nih razmazana. Eto stoimost JADRA, a ne polnaja
+stoimost vyzova iz grafa.
+
+### rope_multi (MROPE) - otkrytyj vopros 10.3, proveren
+
+Sochetanie, kotorogo v dereve ne bylo: sekcii **{11,11,10,0}** pri **n_rot 64 < head_dim 256**,
+baza **5e6**. Vulkan sovpal s CPU:
+
+    ROPE [256,16,1,1] n_dims 64  mode 8 (MROPE) baza 5e6    OK
+    ROPE [256, 2,1,1] n_dims 64  mode 8 (MROPE) baza 5e6    OK
+    ROPE [256,16,1,1] n_dims 256 mode 8 (MROPE) baza 5e6    OK   (kontrol: vsja golova)
+
+**Chinit nechego** - operacija uzhe verna. Preprjatstvie dlja perenosa 12 sloev vnimanija na
+kartu ostajotsja tolko na storone `gpu_static` (`t_pos_` razmerom [4W], sekcii, KV na 12 sloev).
+
+Poputno najdeno: **`ggml_rope_multi` v etom dereve ne prinimaet nulevye sekcii vovse** -
+`GGML_ASSERT(sections[0] > 0 || sections[1] > 0 || sections[2] > 0)`, ggml.c:21050. To est
+"tekstovaja forma cherez rope_multi" (kommentarij v memex-fwd.cpp okolo stroki 1441) rabotaet
+tolko potomu, chto u teh arhitektur `rope_type` ne MROPE i vetka s sekcijami ne berjotsja.
+
+### Pobochnoe: test-backend-ops v etom dereve nikogda ne sobiralsja
+
+Fajl `tests/test-backend-ops.cpp` lezhal v dereve, no **ni odna cel ego ne sobirala** - v
+`tests/CMakeLists.txt` ego ne bylo, a `LLAMA_BUILD_TESTS` v `build-vk` stojal `OFF`. Poetomu
+sverki operacij Vulkan protiv CPU zdes ne bylo nikogda, i fajl uspel ustaret protiv ggml.
+Chtoby on sobralsja, prishlos pochinit: `ggml_quantize_chunk` (sedmoj parametr `user_data`),
+`ggml_upscale` i `ggml_upscale_ext` (rezhim interpoljacii), otkljuchit `test_pad_ext` (struktury
+v dereve net vovse, a registracija est - prishla iz bolee novogo apstrima), privesti perebor
+`FLASH_ATTN_EXT` k tomu, chto umeet zdeshnjaja struktura (vosem argumentov vmesto dvenadcati:
+razdelnye hsk/hsv, sinks, prec i permute zdes NE PROVERJAJUTSJA).
+
+**I odna lovushka sborki, kotoruju stoit zapomnit.** `vulkan-shaders-gen` podkljuchjon cherez
+`ExternalProject_Add` bez `BUILD_ALWAYS`, i po shtampam on schitalsja gotovym: exe ot
+**19 avgusta** perezhil vse peresborki. Novye `.comp` v zagolovok ne popadali, ggml-vulkan.cpp
+ne nahodil `ssm_conv_f32_len` - a `build_safe.ps1` pechataet dve poslednie stroki vyvoda, v
+kotorye oshibka ne popadala, tak chto otkaz vygljadel kak "cmake vernul 1" bez prichiny.
+Lechitsja udaleniem shtampov `vulkan-shaders-gen-{build,done,install}` iz
+`build-vk/ggml/src/vulkan-shaders-gen-prefix/src/vulkan-shaders-gen-stamp/Release/` i
+sgenerirovannyh `ggml-vulkan-shaders.{hpp,cpp}`. **Ljuboj, kto dobavljaet shejder, na eto
+naletit.**
+
+Vtoraja: `build_safe.ps1` proverjaet zapuskaemost cherez `--version`, a test-backend-ops takogo
+argumenta ne znaet i vozvrashchaet 1. Poetomu on **vsegda** otchityvaetsja "NE ZAPUSKAETSJA:
+test-backend-ops : kod vyhoda 1" pri uspeshnoj sborke. Derevo pri etom celo (proverjeno po
+razmeru ggml.dll 46 MB i po tomu, chto binarnik gonjaetsja).
+
+Tretja: `eval()` v test-backend-ops otvodil pod tenzory rovno 128 mest, a cepochka iz 16 shagov
+delta-seti sozdajot okolo 208. Kontekst perepolnjalsja, `ggml_new_object` vozvrashchal NULL,
+sledujushchee obrashchenie padalo po adresu - i **padenie vygljadelo kak sboj poslednego
+napechatannogo testa ljubogo filtra**, potomu chto `eval()` stroit graf KAZHDOGO sluchaja i
+tolko potom sravnivaet imja operacii s filtrom, a stroka "OK" tak i ostavalas v bufere vyvoda.
+Podnjato do 1024.
+
+### Chto NE proverjeno
+
+- **Nichego iz etogo ne prognano na samoj modeli.** Sverka - tolko `test-backend-ops` protiv
+  CPU na sluchajnyh vhodah. `--decode-check 16` na Qwen3-Coder-Next s delta-slojami na karte
+  ne delalsja: dlja etogo nuzhen shag 3b (`gpu_static` dolzhen stroit sloj na karte), a ego net.
+- **Vyigrysh po skorosti ne pokazan i ne mog byt pokazan.** 3,7 ms na token - eto ocenka
+  po summe zamerennyh jader, a ne izmerennaja raznica plech.
+- q i k v teste **ne L2-normirovany** (ravnomernye v [-1,1]). Na iqk-puti eto zakonno - on
+  normirovku ne delaet - no raspredelenie vhodov ne to, chto v modeli.
+- `saved_steps` (poshagovyj snimok sostojanija dlja prefilla) i put KDA (`g->ne[1] == S_v`) na
+  Vulkan otkazany, no otkaz **ne vyzvan zamerom**: v test-backend-ops dlja nih net postroitelja.
+- Prefill (n_tokens > 1) u DELTA_NET otkazan namerenno i ne realizovan. U SSM_CONV obshchij
+  sluchaj po tokenam realizovan i sveren na 4 tokenah, no v modeli poka ne ispolzuetsja.
+- Chislo 10 mks na dispatch vzjato iz razdela 1 HANDOFF_ROUTER.md, **zdes ne peremerjano**.
+- `test-backend-ops` na drugih operacijah krome nazvannyh polnostju ne gonjalsja: filtr `-o`
+  propuskaet ostalnye, i 1466/1466 - eto "vse ostalnye propushcheny ili podderzhany", a ne
+  "vse ostalnye svereny".
+
