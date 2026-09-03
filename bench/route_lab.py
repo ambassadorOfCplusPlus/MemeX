@@ -240,7 +240,7 @@ def prior_from(trace, n_exp):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('trace')
-    ap.add_argument('--prior', help='след другого текста для затравки холодного старта')
+    ap.add_argument('--prior', action='append', help='след другого текста для затравки холодного старта (можно несколько раз, частоты суммируются)')
     ap.add_argument('--cold', type=int, default=200, help='длина холодного старта в токенах')
     ap.add_argument('--resident', default='128,192,256,320,384,410',
                     help='бюджеты резидентности (экспертов на слой в ОЗУ)')
@@ -264,14 +264,15 @@ def main():
               'недействительны (урок HANDOFF_ROUTER §4)' % (n_tok * n_used / n_exp))
 
     prior_f = prior_T = None
-    if a.prior:
-        ptr, pexp, pfmt = load_trace(a.prior)
+    for pp in (a.prior or []):
+        ptr, pexp, pfmt = load_trace(pp)
         if pexp != n_exp or ptr.shape[1] != n_layer:
-            print('  prior: другая геометрия (%d слоёв, %d экспертов) - затравка НЕ применена'
-                  % (ptr.shape[1], pexp))
-        else:
-            prior_f, prior_T = prior_from(ptr, n_exp)
-            print('  затравка с чужого текста: %s (%d токенов)' % (a.prior, ptr.shape[0]))
+            print('  prior %s: другая геометрия (%d слоёв, %d экспертов) - НЕ применён' % (pp, ptr.shape[1], pexp))
+            continue
+        f, T = prior_from(ptr, n_exp)
+        prior_f = f if prior_f is None else prior_f + f
+        prior_T = T if prior_T is None else prior_T + T
+        print('  затравка с чужого текста: %s (%d токенов)' % (pp, ptr.shape[0]))
 
     resident = [int(x) for x in a.resident.split(',') if int(x) < n_exp]
     prefetch = [int(x) for x in a.prefetch.split(',') if int(x) < n_exp]
