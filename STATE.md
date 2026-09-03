@@ -6121,3 +6121,91 @@ eto drugaja model.
 Zagrjaznenie, priznano: moj python vne zamka (19:44-19:49) isportil krugi 1-2 A/B shaga 1;
 osirotevshij find.exe ot revju-agenta 37 minut livlochil ochered zamka. Pravilo: vsjo tjazhjoloe
 tolko pod zamkom, subagentam - nikakih poiskov ot kornja.
+
+
+---
+
+## Raskladka grafa nevinovna; etalon schital prefill na Vulkan v f16 (dbg-layout)
+
+**Simptom, s kotorogo nachali.** U qwen3next `--decode-check 16` posle kommita `20e87be6`
+(kopija marshrutizacii pod flagom `want_sel`) dal drugie chisla: hudshij shag 10,1875 -> 10,5839 %,
+prefill 8,4314 -> 8,7740 %. Predpolozhenie: kakoj-to uzel v puti delta-seti chitaet bufer, kotoryj
+gallocr uzhe otdal drugomu uzlu (lovushka 7.3), - to est chisla zavisjat ot RAZMESHCHENIJA.
+
+**Pereklyuchatelja dlja etoj proverki ne bylo.** `MEMEX_EXPERT_TRACE` vlijaet na `want_sel` tolko
+v vetke `--gen` (memex-fwd.cpp:7776), a `--decode-check` s `--gen` nesovmestim i otkazyvaet vsluh.
+To est sravnenie dvuh raskladok na glavnoj proverke ranshe bylo prosto nevozmozhno. Dobavlen
+`MEMEX_LAYOUT_SEL`: on stavit `want_sel` vo VSEH tochkah postroenija (build_any) i pechataet imja
+kazhdoj tochki, gde srabotal.
+
+**Gipoteza raskladki OPROVERGNUTA izmereniem.** Dva progona, `compare` i `generator` oba postroili
+kopiju (est stroki `MEMEX_LAYOUT_SEL: tochka ...`), 48 lishnih zakreplennyh uzlov na sloj:
+
+    bez MEMEX_LAYOUT_SEL   prefill 8,7740 %   hudshij shag 10,5839 % na 4   14 iz 16 tokenov
+    s   MEMEX_LAYOUT_SEL   prefill 8,7740 %   hudshij shag 10,5839 % na 4   14 iz 16 tokenov
+
+Sovpadenie do poslednego znaka; logi `dbg_layout_with_p1.log` / `dbg_layout_without_p1.log`
+razlichajutsja ROVNO odnoj strokoj - vremenem prefilla. Poslojnye zondy (`--probe all`) tozhe
+raskladku menjajut (kazhdyj zond pinit tenzor) i tozhe nichego ne menjajut v chislah. Znachit
+prichina ne v gallocr i ne v porjadke uzlov.
+
+**Nastojashchaja prichina najdena po logu zagruzchika.** Etalonnaja model gruzitsja s
+`n_gpu_layers = 0`, i iz etogo dva goda delalsja vyvod, chto `llama_decode` schitaet na
+processore. Log govoril obratnoe pri nule sloev na karte:
+
+    llama_init_from_model:    Vulkan0 compute buffer size =   548.19 MiB
+    llama_init_from_model: graph splits = 951
+
+Planirovshchik smotrit ne tolko na to, gde lezhat vesa: uzel, chi vesa na hoste, vsjo ravno
+predlagaetsja bolee prioritetnomu bekendu (ggml-backend.cpp:1352), i Vulkan berjot ego, esli
+`ggml_backend_vk_offload_op` skazhet da - a on govorit da pri `ne[1] >= 32`
+(ggml-vulkan.cpp:11705, `min_batch_size = 32`). **Promt sverki - rovno 32 tokena**, tak chto tuda
+uezzhal ves prefill, s nakopleniem v f16 (lovushka 7.6). Nash put - chisto processornyj f32.
+
+Zondy na tom zhe progone eto i pokazyvali, prosto nekomu bylo prochitat: `linear_attn_mixed_ba-0` -
+PERVYJ matmul PERVOGO sloja - rashodilsja na 0,5332 % pri 32 tokenah i na **0,0000 %** pri odnom
+tokene na shage dekoda. Odna i ta zhe operacija, odni i te zhe vesa, raznica tolko v shirine -
+eto ne oshibka grafa, eto smena bekenda po porogu 32.
+
+**Pravka** (memex-fwd.cpp, posle sozdanija etalonnogo konteksta): `llama_set_offload_policy(lctx,
+-1, false)` - odin vyzov gasit vygruzku dlja vseh operacij srazu. Po umolchaniju VYKLJUCHENO i
+skazano vsluh v vyvode; `--ref-offload` vozvrashchaet staroe povedenie dlja teh sluchaev, kogda
+sravnit nado imenno so shtatnym forkom.
+
+**Chisla do i posle** (prompt_micro, `--tokens 32 --decode-check 16 -t 8 --no-repack`):
+
+    model            etalon      prefill L2   hudshij shag   tokeny   prefill etalona
+    qwen3next        Vulkan      8,7740 %     10,5839 % (4)  14/16    12298 ms
+    qwen3next        CPU         6,8449 %      9,1129 % (4)  15/16     2448 ms
+    mx1 (qwen3moe)   Vulkan      4,0753 %      7,8052 % (4)  14/16     6666 ms
+    mx1              CPU         3,8137 %      9,7880 % (4)  16/16     1737 ms
+    gemma4 --ref-fa  Vulkan      1,5074 %      7,7652 % (5)  14/16
+    gemma4 --ref-fa  CPU         0,9421 %      7,7766 % (1)  15/16
+
+Soglasie tokenov vyroslo vezde. Chestno: u mx1 hudshij shag po L2 stal BOLSHE (7,81 -> 9,79) pri
+16 iz 16 tokenov - eto haoticheskoe usilenie mikroraznicy cherez top-k, a ne uhudshenie puti.
+Pobochno: etalon na CPU v 5 raz bystree (12298 -> 2448 ms) - vygruzka cherez PCIe 3.0 x4 stoila
+desjat sekund na 32 tokena.
+
+**Chto teper vidno v zondah** (qwen3next, etalon na CPU, `dbg_probe_next_refcpu.log`):
+
+    sloj 0: linear_attn_mixed_ba, alpha, conv_output_raw, ssm_output, ffn_inp_normed, l_out
+            - VSE po 0,0000 %, max |d| 0,00000 na 294912 elementah
+    sloj 1: ba/alpha/conv - 0,0000 %; pervoe nenulevoe - ssm_output-1, L2 0,0008 %, max |d| 3e-5
+    dalshe: rastjot gladko, result_norm 13,99 %, logity 6,8449 %
+
+To est ves put delta-seti sveren POBITOVO na pervom sloe. Ostatok - shum poriadka 1e-5, kotoryj
+usilivaetsja marshrutizaciej top-10 iz 512: odin blizkij k nichjej vybor eksperta menjaet vyhod
+sloja celikom. Uroven tot zhe, chto u davno prinjatogo qwen3moe (9,79 % pri 16 iz 16 tokenov).
+
+**Chego NE proverjali.** Otkuda beryotsja te samye 1e-5 na sloe 1 pri nulevom rashozhdenii na
+sloe 0 - ne najdeno; kandidaty: fuzija `ggml_delta_net_find_state_cpy` (ggml.c:24185) srabatyvaet
+u nas i u etalona po raznomu porjadku uzlov, i `iqk_ssm_conv4` (iqk_cpu_ops.cpp:617) s ejo
+slijaniem SILU, u kotorogo storozh proverjaet perekrytie tolko so vhodom `x`, no ne s samim `dst`
+i ne s sostojaniem. Na etom promte bystryj put conv ne rabotaet voobshche (`nt <= 32` otsekaet), tak
+chto slijanie ne proverjalos ni razu. Gemma4 bez `--ref-fa` rashoditsja 3 iz 16 i DO pravki
+(L2 533 %), i posle - eto izvestnaja oshibka SAMOGO etalona (transponirovannyj V-kesh), a ne nasha.
+
+Instrumenty: `bench/dbg_layout.ps1` (dve raskladki), `bench/dbg_vkoffload.ps1` (porog 32),
+`bench/dbg_refcpu.ps1`, `bench/dbg_g4_control.ps1`, `bench/dbg_mx1_control.ps1`,
+`bench/dbg_probe_next.ps1`, `bench/dbg_build_retry.ps1`. Logi - `D:/MemeX/results/dbg_*.log`.
