@@ -6223,3 +6223,72 @@ gemma4 bez `--ref-fa` snova 3 iz 16 pri 751,7162 % - kak i do pravki.
 Instrumenty: `bench/dbg_layout.ps1` (dve raskladki), `bench/dbg_vkoffload.ps1` (porog 32),
 `bench/dbg_refcpu.ps1`, `bench/dbg_g4_control.ps1`, `bench/dbg_mx1_control.ps1`,
 `bench/dbg_probe_next.ps1`, `bench/dbg_build_retry.ps1`. Logi - `D:/MemeX/results/dbg_*.log`.
+
+
+---
+
+## Damp skrytyh sostojanij snjat; predskazatel po nemu izmeren (MEMEX_HIDDEN_TRACE)
+
+Dvizhok teper umeet vygruzhat VHOD MARSHRUTIZATORA - vyhod `ffn_norm` kazhdogo sloja na kazhdom
+tokene, to est rovno to, na chto smotrit `ggml_top_k`. Peremennaja `MEMEX_HIDDEN_TRACE=<fajl>`,
+tochka snjatija ta zhe, chto u sleda `MEMEX_EXPERT_TRACE`: prohod prefilla kuskami v vetke
+`--gen`. Format: zagolovok int32[4] = {n_tokens, n_layer, n_embd, 1}, telo f16
+[token][sloj][n_embd]; poriadok tokenov tot zhe, chto u sleda, potomu chto oba sobirajutsja v
+ODNOM prohode.
+
+Ustrojstvo - kak u `sel`: `ggml_cont` + `ggml_set_output` + objazatelnyj
+`ggml_build_forward_expand` (lovushka 7.2), v `g->hid_outs` po slojam, i TOLKO kogda peremennaja
+zadana. Umeet eto odin stroitel (`build_qwen35_step`); `build_any` otkazyvaet vsluh dlja
+qwen3moe i gemma4, a ne pishet nuli pod imenem fajla.
+
+**Graf bez peremennoj ne izmenilsja.** `--decode-check 16` na qwen3next bez `MEMEX_HIDDEN_TRACE`:
+prefill 6,8449 %, hudshij shag 9,1129 % na 4, 15 iz 16 tokenov - te zhe cifry do znaka, chto v
+predydushchem razdele.
+
+**Snjato** (`prompt_2000.txt`, `--tokens 1900 --gen 2 -t 8 --no-repack --no-ref
+--prefill-chunk 128`, sled i damp odnim progonom): `hidden_trace.bin` 373 555 216 bajt =
+16 + 1900x48x2048x2, 720 sloev-kuskov (15 kuskov x 48 sloev); `route_trace_h.bin` 3 648 016 =
+16 + 1900x48x10x4.
+
+**PROVERKA k=0: 99,98 %** - damp i sled soglasovany. Ne rovno 100 potomu, chto damp f16, a
+dvizhok schital top-k v f32: neskolko mest na blizkih k nichjej logitah perevorachivajutsja.
+Porog skripta (>= 99 %) projden.
+
+**Chto predskazyvaetsja: eksperty sloev l+1..l+k TOGO ZHE tokena po sostojaniju sloja l** - to
+est zadacha ne ta, chto u chastotnoj tablicy iz razdela vyshe (ta govorit pro sledujushchij
+TOKEN). Dolja popadanij, % (srednee / holodnyj start / hudshij sloj), bjudzhet - ekspertov na
+sloj iz 512:
+
+    k=1                        10                   16                   24                   32
+    R0 svoj marshrutizator   75,89/83,46/40,18   89,67/95,02/55,82   95,35/97,93/75,26   97,32/98,76/81,18
+    R1 podpravlennyj         85,41/  --  /77,12   96,78/  --  /90,37   99,17/  --  /95,28   99,65/  --  /97,18
+    R2 svoj linejnyj         82,78/  --  /72,35   94,57/  --  /86,77   98,05/  --  /93,52   99,07/  --  /96,45
+
+    k=2  R0 68,14/77,28/41,51   R1 (16) 94,15/--/88,35   R1 (32) 99,09/--/96,52
+    k=4  R0 58,98/69,73/26,91   R1 (16) 90,16/--/83,72   R1 (32) 97,75/--/94,59
+
+Tri veshchi, kotorye eto govorit:
+
+1. **R0 daroven i nedostatochen.** Nol novyh vesov - marshrutizator sloja l+k, prilozhennyj k
+   sostojaniju sloja l, - no u HUDSHEGO sloja pri bjudzhete 10 vsego 40 % (k=1) i 27 % (k=4).
+   Srednee 76 % skryvaet imenno tot sloj, v kotorom sluchaetsja promah.
+2. **Popravka v 513x512 zakryvaet razryv.** R1 pri bjudzhete 16 (3,1 % modeli) dajot 96,78 % v
+   srednem i 90,37 % u hudshego sloja na k=1; pri 32 - 99,65 / 97,18. Eto na poriadok deshevle
+   rezidentnogo nabora v 128-320 ekspertov na sloj.
+3. **R1 luchshe R2, hotja R2 nazvan potolkom.** R2 - polnyj 2049x512, R1 - popravka 513x512
+   poverh R0. Na 950 obuchajushchih tokenah polnyj rang pereobuchaetsja, a popravka net. To est
+   "potolok" v skripte - potolok sposoba, a ne zadachi, i eto nado ispravit v nazvanii.
+
+**Holodnyj start u R0 LUCHSHE srednego** (83,46 protiv 75,89 pri bjudzhete 10, k=1) - protivopolozhno
+chastotnoj tablice, u kotoroj holodnyj start prosedaet s 98,4 do 89,3. Eto i est to preimushchestvo
+skrytogo sostojanija, radi kotorogo ono merilos: istorii emu ne nuzhno.
+
+**Chego NE izmereno.** Stoimost predskazatelja v dvizhke (R0 - odin matvektor [2048x512] na paru
+sloev; R1 - takoj zhe plus popravka). R1/R2 obucheny na PERVOJ polovine etogo dokumenta, perenos
+na drugoj tekst ne meren. Damp snjat na nashem promte, a ne na sobstvennom prodolzhenii modeli.
+Predskazanie ekspertov SLEDUJUSHCHEGO tokena po skrytomu sostojaniju (a ne sledujushchih sloev
+togo zhe) ne probovalos - dlja nego v dampe est vsjo, no hidden_lab.py takogo sposoba ne schitaet.
+Sostojanie na sgenerirovannyh tokenah v damp ne popadaet: on pishetsja srazu posle prefilla.
+
+Instrumenty: `bench/dbg_hidden.ps1` (proverka bez peremennoj + snjatie), `bench/dbg_hidden_lab.ps1`.
+Vyvod - `D:/MemeX/results/hidden_lab_coder_next.txt`.
