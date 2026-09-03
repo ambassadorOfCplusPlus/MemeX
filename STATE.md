@@ -5543,3 +5543,39 @@ v 31,9 GB pamjati. Eto rovno tot razryv, na kotoryj nacelena dvuhurovnevaja rask
   3. Krivaja pokrytija ekspertov NA NJOM (512 ekspertov protiv 128 u gemmy).
   4. Statika na kartu: 964 MB iz 2,26 GB perenositsja bez novyh operacij, ostalnoe - delta-set,
      kotoroj na karte net.
+
+## KRIVAJA POKRYTIJA NA SAMOM CODER NEXT: moja ekstrapoljacija s GEMMY OPROVERGNUTA
+
+Ranshe krivaja merилась tolko na gemme (128 ekspertov, top-8), i ja sam nazyval risk: pri
+bolshem chisle ekspertov raspredelenie mozhet byt ploshche. Tak i vyshlo. Coder Next: 512
+ekspertov, top-10, 48 sloev, promt 400 tokenov.
+
+    srez   8 iz 512 ( 1,6% modeli): pokrytie 30,50%, u hudshego sloja 12,15%
+    srez  32 iz 512 ( 6,2%):        63,20%,           37,10%
+    srez  64 iz 512 (12,5%):        79,70%,           54,23%
+    srez  96 iz 512 (18,8%):        87,83%,           63,85%
+
+**A reshajushchee - perenos VNUTRI dokumenta (srez po pervoj polovine -> vtoraja):**
+
+    srez  32: 61,41% -> 41,61%   poterja 19,81 punkta
+    srez  64: 77,78% -> 58,54%   poterja 19,24
+    srez  96: 86,70% -> 68,06%   poterja 18,64
+
+U GEMMY ta zhe velichina byla ot 0 do -3 punktov, chasto v PLJUS (vtoraja polovina pokryvalas
+luchshe). Zdes - stabilno MINUS DEVJATNADCAT.
+
+**Chto iz etogo sleduet.** Pri 512 ekspertah i top-10 marshrutizacija gorazdo bolee rassejannaja,
+i gorjachee mnozhestvo plyvjot dazhe v predelah odnogo teksta. **Prostoj chastoty po prochitannomu
+dlja Coder Next NEDOSTATOCHNO** - to est imenno zdes obuchaemyj predskazatel nuzhen po-nastojashchemu,
+a ne kak uluchshenie. Dlja gemmy on byl by lishnim (chastota dajot 99,6%), dlja Coder Next -
+neobhodim.
+
+I dlja dvuhurovnevoj raskladki eto menjaet ocenku: pri 59,5% rezidentnyh promahi byli by ne 1,5%,
+a poriadka 20-25%, to est 480 x 0,22 = 106 ekspertov na token x 3,6 ms (SSD) = **380 ms na token**
+vmesto ocenennyh 29. Ocenka ~12,3 tok/s dlja Coder Next na dvuh urovnjah - NEDEJSTVITELNA, poka
+predskazanie ne luchshe chastoty.
+
+**OGOVORKA, kotoruju nado proverit pered vyvodami.** Promt 400 tokenov, poloviny po 200: eto
+2000 obrashchenij na 512 ekspertov, okolo CHETYRJOH na eksperta - vpolne mozhet byt shum ocenki,
+a ne drejf. Kontrol na promte v desjat raz dlinnee zapushchen; esli poterja sxlopnetsja - byl
+shum, esli ostanetsja ~19 punktov - dreif nastojashchij.
