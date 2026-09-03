@@ -5579,3 +5579,68 @@ predskazanie ne luchshe chastoty.
 2000 obrashchenij na 512 ekspertov, okolo CHETYRJOH na eksperta - vpolne mozhet byt shum ocenki,
 a ne drejf. Kontrol na promte v desjat raz dlinnee zapushchen; esli poterja sxlopnetsja - byl
 shum, esli ostanetsja ~19 punktov - dreif nastojashchij.
+
+## KRIVAJA DOTJANUTA DO REALNOJ DOLI; POTERJA BYLA SHUM
+
+Kontrol na promte v desjat raz dlinnee (1900 tokenov, poloviny po 950 - okolo 19 obrashchenij na
+eksperta vmesto chetyrjoh) OPROVERG moj zhe vyvod o drejfe:
+
+    srez  32: 70,60% -> 75,37%  poterja -4,77 punkta   (bylo -19,81 na 400 tokenah)
+    srez  64: 85,01% -> 87,61%  poterja -2,60          (bylo -19,24)
+    srez  96: 91,55% -> 93,38%  poterja -1,84          (bylo -18,64)
+
+Poterja OTRICATELNAJA - vtoraja polovina pokryta LUCHSHE, tochno kak u gemmy. Znachit "chastoty
+nedostatochno, predskazatel neobhodim" bylo postroeno na shume ocenki, i ja eto snimayu.
+Chastota po dostatochno dlinnoj istorii u Coder Next rabotaet; predskazatel nuzhen na HOLODNOM
+STARTE, gde istorii jeshchjo net.
+
+Krivaja dotjanuta do doli, kotoraja realno vlezaet v OZU:
+
+    srez 128 iz 512 (25,0% modeli): 96,42%, u hudshego sloja 88,14%
+    srez 192 iz 512 (37,5%):        98,93%,                  94,87%
+    srez 256 iz 512 (50,0%):        99,72%,                  97,35%
+    srez 320 iz 512 (62,5%):        99,94%,                  98,88%
+
+## GOLOVA CODER NEXT NA KARTE: VERNO, NO VYIGRYSH NE POKAZAN
+
+Sdelano: build_qwen35_step prinimaet gstat, golova idjot cherez head_matmul, zapret --gpu-static
+rasshiren (TOLKO na golovu - sloi zapreshcheny, u modulja karty net programmy bloka).
+
+**Po puti najdena oshibka togo zhe roda, chto i vezde v etu noch:** vybor golovy byl
+ternarnikom iz DVUH vetok - `arch_g4 ? w4.out : w.out`, - i dlja qwen35moe/qwen3next on bral
+golovu iz struktury QWEN3MOE, kotoruju nikto ne zapolnjal. Otkaz prozvuchal tolko potomu, chto
+tam okazalsja nol ("output.weight otsutstvuet"), hotja golova u modeli EST - ona svjazana s
+token_embd, i zagruzchik qwen35 eto uzhe uchjol. Bud struktura w zapolnena, na kartu ushla by
+golova DRUGOJ modeli, i eto ne upalo by.
+
+**Sverka golovy - tri kanala, vse projdeny:**
+    pobajtnoe sravnenie s modelju: 243,4 MiB provereno
+    kuda ljog bufer: 264,00 MiB - VNE BAR-okna (inache chitalos by 3,1 GB/s i "rabotalo" by obmanchivo)
+    sverka s llama_decode: 3 iz 3 tokenov, hudshij L2 6,3305% (na processornoj golove bylo 6,3383)
+
+**A/B (chereduja plechi, po tri kruga - odin proxod byl NEDEJSTVITELEN):**
+
+    karta:      6,277 / 6,043 / 6,119  sred 6,146  razbros 3,8%   golova 3,89 ms
+    processor:  6,084 / 6,060 / 6,080  sred 6,075  razbros 0,4%
+
+Karta bystree na 1,2% po srednemu, NO razbros karrochnogo plecha (3,8%) bolshe effekta, a minimum
+karty (6,043) nizhe maksimuma processora (6,084) - raspredelenija peresekajutsja. **Vyigrysh NE
+POKAZAN.** Pokazano tolko, chto golova na karte schitaet verno i stoit 3,89 ms iz 164.
+
+Pervyj proxod A/B ja otbrosil sam: ta zhe komanda dala 2,9661 tok/s, a potom 6,0122 - vdvoe.
+Model 27 GB ne vlezaet v 32 GB, i rezultat zavisit ot togo, chto ostalos v stranichnom keshe ot
+predydushchego zapuska. Vtoroe plecho vyigryvalo ot pervogo.
+
+**PEREOCENKA PRIORITETA.** 164 ms na token protiv potolka 101 ms pri polnom razmeshchenii v OZU -
+my na 62% VYSHE potolka, i eto podkachka s diska. Golova rjadom s etim - okruglenie. Znachit dlja
+Coder Next glavnoe ne GDE lezhit statika, a SKOLKO prihoditsja chitat za token.
+
+I moja ocenka statiki byla zavyshena: ja govoril 2,26 GB i 91 ms, a iz samogo fajla schitaetsja
+1,85 GB i 74,5 ms - raznica 22%, tak chto vse procenty ot 2,26 nedejstvitelny.
+
+**DELTA-SET NA KARTU POLOZHIT NELZJA VOOBSHCHE.** U Vulkan net ni odnoj nuzhnoj operacii:
+SSM_CONV otsutstvuet, DELTA_NET est tolko dlja CUDA, SOFTPLUS otsutstvuet, L2_NORM sobran no vse
+tochki ego podkljuchenija zakommentirovany. 36 sloev iz 48 - eto tri novyh vychislitelnyh jadra,
+a ne parametrizacija. Perenosimoe (golova + 12 sloev vnimanija + marshrutizatory + obshchie
+eksperty) = 769 MiB, i v 4 GB vlezaet s zapasom 1,5 GB: zdes ogranichenie NE pamjat, a
+otsutstvujushchie operacii - naoborot, chem u gemmy.
