@@ -6206,6 +6206,12 @@ i ne s sostojaniem. Na etom promte bystryj put conv ne rabotaet voobshche (`nt <
 chto slijanie ne proverjalos ni razu. Gemma4 bez `--ref-fa` rashoditsja 3 iz 16 i DO pravki
 (L2 533 %), i posle - eto izvestnaja oshibka SAMOGO etalona (transponirovannyj V-kesh), a ne nasha.
 
+**Kontrol na peresobrannom binarnike** (sborka 22:31, v dereve k etomu momentu uzhe lezhala
+chuzhaja nezavershjonnaja rabota po sloyam na karte - poetomu i pereproverjali). Vse cifry
+vosproizvedeny do znaka: qwen3next 6,8449 / 9,1129 / 15 iz 16 i pri `MEMEX_LAYOUT_SEL` tozhe;
+`--ref-offload` snova dajot 8,7740 / 10,5839 / 14 iz 16; mx1 3,8137 / 9,7880 / 16 iz 16;
+gemma4 bez `--ref-fa` snova 3 iz 16 pri 751,7162 % - kak i do pravki.
+
 Instrumenty: `bench/dbg_layout.ps1` (dve raskladki), `bench/dbg_vkoffload.ps1` (porog 32),
 `bench/dbg_refcpu.ps1`, `bench/dbg_g4_control.ps1`, `bench/dbg_mx1_control.ps1`,
 `bench/dbg_probe_next.ps1`, `bench/dbg_build_retry.ps1`. Logi - `D:/MemeX/results/dbg_*.log`.
