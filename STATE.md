@@ -5501,3 +5501,45 @@ na 14,8% uzhe na PERVOM sloe. Rovno tot vid otkaza, kotoryj lovitsja tolko sverk
 generacii (--gen dlja etoj vetki zakryt iz-za perenosa sostojanija delta-seti mezhdu shagami);
 krivaja pokrytija ekspertov na SAMOM Coder Next - ona nuzhna dlja dvuhurovnevoj raskladki
 OZU+SSD, i mereno pока na gemme (128 ekspertov protiv 512 zdes).
+
+## --gen OTKRYT DLJA qwen35moe I qwen3next. Coder Next izmeren
+
+**Prichina v zaprete byla nazvana NEVERNO.** On govoril: "u delta-seti sostojanie mezhdu shagami
+cikl generacii ne perenosit". Perenosit - i perenosit SAM GRAF: sloj delta-seti pishet novoe
+sostojanie obratno v tot zhe bufer DeltaState cherez ggml_cpy (ssm_cpy, conv_cpy). Ciklu nado
+tolko peredavat odin i tot zhe DeltaState.
+
+Meshalo drugoe: TRI tochki postroenija grafov v cikle (prefill, ego ostatok, dekod) imeli tolko
+DVE vetki - gemma4 i build_step, - i qwen35moe popal by v CHUZHOJ stroitel, to est poluchil by
+rabotajushchij graf s drugim otvetom. Tot zhe rod oshibki, chto uzhe byl s chetyrmja zhjostkimi
+vyzovami build_step do gemma4.
+
+Sdelano: svoj DeltaState v harnesse (odin na progon), tretja vetka v trjoh tochkah, zapret
+snjat. Razvjortka shirin (MEMEX_SPEC_WIDTH) dlja etih arhitektur teper OTKAZYVAET vsluh, a ne
+merit chuzhim stroitelem.
+
+**SVERKA CIKLA - soglasiem s putjom, kotoryj sveren s llama_decode:**
+
+    --gen           1817, 3950, 323, 49143, 264, 2613, 1372, 315
+    --decode-check   1817 (sveren s etalonom), 3950, 323, 49143
+                     sovpadenie polnoe na vseh chetyrjoh
+
+**IZMERENO: Coder Next (IQ3_XXS, 28,5 GB) = 2,9661 tok/s, 337,14 ms na token.**
+
+Potolok, esli by model vlezala v OZU:
+
+    ekspert pri IQ3_XXS ~1,25 MB;  480 ekspertov na token = 600 MB
+    statika ~1,9 GB (masshtabirovano s IQ4_XS: 2,26 GB)
+    vsego ~2,5 GB na token  =>  101 ms pri 24,8 GB/s  =>  9,9 tok/s
+
+Izmereno 337 ms, to est **236 ms na token dobavljaet mehanicheskij disk**: 28,5 GB ne vlezajut
+v 31,9 GB pamjati. Eto rovno tot razryv, na kotoryj nacelena dvuhurovnevaja raskladka
+(statika na kartu, eksperty OZU+SSD): ejo ocenka byla ~12,3 tok/s dlja IQ4_XS.
+
+**Chto ostajotsja po Coder Next:**
+  1. Sverka dlinnee (3 shaga pri L2 6-8% - slaboe dokazatelstvo; delta-set nakaplivaet).
+  2. Rezidentnyj nabor dlja etoj vetki: sejchas otkazan, i prichina nazvana - obshchij ekspert
+     chitaetsja kazhdyj token i rezidentnyj nabor ego ne modeliruet.
+  3. Krivaja pokrytija ekspertov NA NJOM (512 ekspertov protiv 128 u gemmy).
+  4. Statika na kartu: 964 MB iz 2,26 GB perenositsja bez novyh operacij, ostalnoe - delta-set,
+     kotoroj na karte net.
