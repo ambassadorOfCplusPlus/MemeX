@@ -6133,7 +6133,7 @@ prefill 8,4314 -> 8,7740 %. Predpolozhenie: kakoj-to uzel v puti delta-seti chit
 gallocr uzhe otdal drugomu uzlu (lovushka 7.3), - to est chisla zavisjat ot RAZMESHCHENIJA.
 
 **Pereklyuchatelja dlja etoj proverki ne bylo.** `MEMEX_EXPERT_TRACE` vlijaet na `want_sel` tolko
-v vetke `--gen` (memex-fwd.cpp:7776), a `--decode-check` s `--gen` nesovmestim i otkazyvaet vsluh.
+v vetke `--gen` (memex-fwd.cpp:7818 posle etoj pravki), a `--decode-check` s `--gen` nesovmestim i otkazyvaet vsluh.
 To est sravnenie dvuh raskladok na glavnoj proverke ranshe bylo prosto nevozmozhno. Dobavlen
 `MEMEX_LAYOUT_SEL`: on stavit `want_sel` vo VSEH tochkah postroenija (build_any) i pechataet imja
 kazhdoj tochki, gde srabotal.
@@ -6159,7 +6159,7 @@ processore. Log govoril obratnoe pri nule sloev na karte:
 Planirovshchik smotrit ne tolko na to, gde lezhat vesa: uzel, chi vesa na hoste, vsjo ravno
 predlagaetsja bolee prioritetnomu bekendu (ggml-backend.cpp:1352), i Vulkan berjot ego, esli
 `ggml_backend_vk_offload_op` skazhet da - a on govorit da pri `ne[1] >= 32`
-(ggml-vulkan.cpp:11705, `min_batch_size = 32`). **Promt sverki - rovno 32 tokena**, tak chto tuda
+(ggml-vulkan.cpp:11706, `min_batch_size = 32`). **Promt sverki - rovno 32 tokena**, tak chto tuda
 uezzhal ves prefill, s nakopleniem v f16 (lovushka 7.6). Nash put - chisto processornyj f32.
 
 Zondy na tom zhe progone eto i pokazyvali, prosto nekomu bylo prochitat: `linear_attn_mixed_ba-0` -
