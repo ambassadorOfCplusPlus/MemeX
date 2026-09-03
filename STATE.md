@@ -6206,6 +6206,14 @@ i ne s sostojaniem. Na etom promte bystryj put conv ne rabotaet voobshche (`nt <
 chto slijanie ne proverjalos ni razu. Gemma4 bez `--ref-fa` rashoditsja 3 iz 16 i DO pravki
 (L2 533 %), i posle - eto izvestnaja oshibka SAMOGO etalona (transponirovannyj V-kesh), a ne nasha.
 
+**Korotkij promt daet polnoe soglasie.** Tot zhe progon na 28 tokenah (`--tokens 31`, harness
+okrugljaet vniz do kratnogo chetyrjom): prefill L2 3,9682 %, hudshij shag 8,0572 %, **16 iz 16
+tokenov**. To est na 32 tokenah rashoditsja odin shag iz shestnadcati, a na 28 - ni odnogo, pri
+tom zhe kode. Eto podtverzhdaet, chto ostatok - nakoplenie mikroshuma, a ne defekt puti.
+(Popytka spryatat kartu celikom cherez `GGML_VK_VISIBLE_DEVICES=' '` NE rabotaet: spisok
+ustrojstv okazyvaetsja pust i process padaet na zagruzke. Vygruzku nado gasit imenno
+`llama_set_offload_policy`.)
+
 **Kontrol na peresobrannom binarnike** (sborka 22:31, v dereve k etomu momentu uzhe lezhala
 chuzhaja nezavershjonnaja rabota po sloyam na karte - poetomu i pereproverjali). Vse cifry
 vosproizvedeny do znaka: qwen3next 6,8449 / 9,1129 / 15 iz 16 i pri `MEMEX_LAYOUT_SEL` tozhe;
