@@ -2190,7 +2190,7 @@ edinstvennye chistye stroki vo vsjom razlozhenii podkachki.
     spin         13,902 tok/s   razbros 6,0%   RAZBROS VYSHE POROGA
     sleep        14,226         razbros 2,8%
 
-+2,3% pri pole shuma 4,2% i odnom plече vyshe poroga. Ne rezultat. Predskazanie bylo +6,9%.
++2,3% pri pole shuma 4,2% i odnom pleche vyshe poroga. Ne rezultat. Predskazanie bylo +6,9%.
 
 **Pochemu predskazanie bylo nevernym, i eto schitalos zaranee.** Ja zhdal vyigrysha ot togo, chto
 osvobozhdaetsja JADRO. No svjazyvajushchij resurs - ne jadro, a POTOK: spin i blokirujushchee
@@ -5644,3 +5644,108 @@ tochki ego podkljuchenija zakommentirovany. 36 sloev iz 48 - eto tri novyh vychi
 a ne parametrizacija. Perenosimoe (golova + 12 sloev vnimanija + marshrutizatory + obshchie
 eksperty) = 769 MiB, i v 4 GB vlezaet s zapasom 1,5 GB: zdes ogranichenie NE pamjat, a
 otsutstvujushchie operacii - naoborot, chem u gemmy.
+
+## SHAG 1 PLANA: MODEL NA SSD, SLED SNJAT, A/B PO PLECHAM C: I D:
+
+Nol koda. Vsjo pod zamkom mashiny (`bench/lock.ps1`, Who = step1 / step1-more2 / step1-traces),
+skripty: `bench/step1_copy_trace_ab.ps1`, `bench/step1_more_ab_traces.ps1`,
+`bench/step1_more2_ab_traces.ps1`, `bench/step1_traces_rest.ps1`.
+
+**Kopija na SSD.** `D:\Qwen3-Coder-Next-UD-IQ3_XXS.gguf` -> `C:\models\`, robocopy `/J`
+(nebufferizovanno, chtoby kopija ne nabila stranichnyj kesh i ne otravila A/B nizhe): 474,1 s,
+57,3 MB/s. Dlina sverena: 28 482 506 752 bajt s obeih storon. Na C: bylo 38,73 GiB svobodno,
+ostalos 11,94. Bityj obrivok `D:\Qwen3-Coder-Next-Q4_K_S.gguf` (12 582 912 bajt) udaljon.
+
+**SLED MARSHRUTIZACII SNJAT** - to, chego v HANDOFF_ROUTER stojalo "jeshchjo ne snjat":
+
+    D:\MemeX\results\route_trace.bin       3 648 016 bajt  1900 tokenov (prompt_2000.txt)
+    D:\MemeX\results\route_trace_code.bin  2 004 496       1044          (prompt_code.txt)
+    D:\MemeX\results\route_trace_ru.bin    1 367 056        712          (prompt_ru.txt)
+    D:\MemeX\results\route_trace_tech.bin    998 416        520          (prompt_tech.txt)
+
+Dlina kazhdogo shoditsja s zagolovkom tochno: 16 + 4*n_tok*48*10. Prohod na 1900 tokenov zanjal
+1,21 min (a ne chas, kak ozhidalos: model teper na SSD). Krivaja pokrytija na etom zhe prohode
+vosproizvelas do vtorogo znaka s toj, chto zapisana vyshe (srez 128: 96,42%, u hudshego sloja
+88,14%; perenos vnutri dokumenta pri sreze 32: -4,77 punkta) - eto nezavisimyj kontrol.
+
+**Baza predskazatelej po sledu 1900 tokenov** (`route_predict.py`, dolja popadanij na SLEDUJUSHCHIJ
+token, `D:\MemeX\results\route_predict_base.txt`):
+
+    bjudzhet                 32      64      96     128     192     256
+    chastota (baza)       73,76   86,78   92,34   95,18   97,59   98,34
+    uporstvo+chastota     76,01   87,96   92,95   95,52   97,68   98,37
+    okno 16+chastota      78,35   90,32   94,19   96,17   97,86   98,41
+    LRU                   77,93   90,32   94,51   96,73   98,25   98,52
+
+CHASTOTA - NE LUCHSHEE, chto est deshjovogo. LRU beriot u nejo 1,55 punkta pri bjudzhete 128
+(26,9 ms na token po cene promaha s SSD) i 3,54 punkta pri 64. To est planka, kotoruju objazan
+bit obuchaemyj predskazatel, vyshe, chem krivaja pokrytija.
+
+Na korotkih tekstah baza sushchestvenno huzhe, i otryv deshjovyh sposobov ot chastoty bolshe:
+
+    bjudzhet 128        chastota   luchshij
+    1900 tok (obshchij)   95,18     96,73 (LRU)
+    1044 tok (kod)        83,35     86,72 (LRU)
+     712 tok (russkij)    84,57     88,14 (okno 16)
+     520 tok (tech)       83,30     84,75 (okno 16)
+
+**Eto sravnenie NE chistoe:** dlina i tekst v njom smeshany. Dolja tokenov, prozhityh na
+holodnom starte, u korotkogo sleda bolshe po postroeniju, i otdelit ejo ot vlijanija samogo
+teksta po etim chetyrjom chislam nelzja. Uroka razdela 4 ("400 tokenov dali -19 punktov, i eto
+byl shum") hvataet, chtoby ne delat otsjuda vyvod o drejfe.
+
+**A/B SKOROSTI: C: PROTIV D:.** `--tokens 32 --gen 8 -t 8 --no-repack --no-ref`, promt
+prompt_micro.txt, plechi cheredujutsja. Krugi 1-2 ZAGRJAZNENY: koordinator soznalsja, chto s
+19:44 do 19:49 vne zamka u nego rabotal odnopotochnyj python na ~100% odnogo jadra. Ih znachenija
+(C 3,3439 / 1,7916, D 3,8240 / 3,4226) v srednee ne vzjaty. Chistye krugi 3-7:
+
+    plecho C: (SSD)  5,6823 / 6,0776 / 6,1845 / 5,3282 / 3,8345  sred 5,4214 tok/s  razbros 43,3%
+    plecho D: (HDD)  5,5335 / 4,6507 / 5,2209 / 4,0697           sred 4,8687 tok/s  razbros 30,1%
+
+**Po tok/s VYIGRYSH SSD NE POKAZAN.** Srednee vyshe na 11,3%, no razbros v tri-chetyre raza
+bolshe effekta, raspredelenija peresekajutsja naskvoz, i v krugu 7 znak raznicy MENJAETSJA
+(C 3,8345 protiv D 4,0697). Vosem sgenerirovannyh tokenov - eto uzhe progretaja chast: k momentu
+generacii nuzhnye stranicy libo v pamjati, libo net, i chto imenno v nej ostalos ot sosednego
+plecha, reshaet bolshe, chem nositel.
+
+**A vot NASTENNOE VREMJA VSEGO PROHODA (zagruzka + prefill 32 + gen 8) pokazano odnoznachno:**
+
+    plecho C: (SSD)  60,9 / 60,0 / 58,5 / 60,6 / 60,4  sred  60,1 s  razbros 4,0%
+    plecho D: (HDD) 180,8 / 184,0 / 180,2 / 187,0      sred 183,0 s  razbros 3,7%
+
+Raspredelenija NE peresekajutsja: hudshij prohod s SSD (60,9 s) v tri raza bystree luchshego s
+HDD (180,2 s). **D:/C: = 3,05x**, i razbros zdes 4% - na porjadok menshe effekta. Znachit
+perenos modeli na SSD stoit merit ne po tok/s korotkoj generacii, a po tomu, gde on i rabotaet:
+po vsemu, chto chitaetsja s diska pervyj raz.
+
+**CHTO NE IZMERENO:**
+- Stranichnyj kesh mezhdu prohodami NE sbrasyvalsja: RAMMap na mashine net. Cheredovanie plech i
+  razbros rjadom so srednim - vsjo, chem eto lechilos.
+- Hesh kopii ne sverjalsja, tolko dlina v bajtah. Celostnost podtverzhdena kosvenno: zagruzchik
+  otkryl kopiju i prohody proshli. `--decode-check` na kopii s C: NE zapuskalsja.
+- Prichina 43% razbrosa na pleche C: ne instrumentirovana. "Stranichnyj kesh" - obyasnenie, a ne
+  izmerenie: schjotchikov popadanij v kesh my ne snimali.
+- Zatravka s CHUZHOGO teksta po tryom dopolnitelnym sledam ne poschitana - sledy snjaty, schjot
+  eto sledujushchij shag.
+- IQ4_XS ne trogali vovse.
+
+**DEFEKT V PISATELE SLEDA, NAJDEN I NE ISPRAVLEN.** Blok zapisi `MEMEX_EXPERT_TRACE` vlozhen
+vnutr `if (getenv("MEMEX_MTP_OVERLAP"))`, poetomu komanda iz HANDOFF_ROUTER §6 sled NE pishet
+vovse. Obhod bez peresborki: zadavat i `MEMEX_MTP_OVERLAP=1` - vse chetyre sleda snjaty tak.
+Pravka mesta ostavlena agentu shaga 2, kotoryj vedjot etot fajl. Kommit pisatelja: 4cc2ce13.
+
+**LOVUSHKA 7.7 SRABOTALA TRETIJ RAZ, teper v moih zhe skriptah.** Ja nazval parametr funkcii
+PowerShell `$Args` - a eto AVTOMATICHESKAJA peremennaja, i vnutri funkcii ona derzhit
+NESVJAZANNYE argumenty, to est pustotu. `& $EXE @Args` zapustil binarnik BEZ argumentov.
+Binarnik ne otkazalsja: on vzjal vshituju model po umolchaniju (Qwen3-Coder-30B-A3B, arhitektura
+qwen3moe, 128 ekspertov iz 8) i otschitalsja polnym pravdopodobnym logom. Pervyj "prohod na
+1900 tokenov" byl prohodom po DRUGOJ MODELI. Poymano tolko potomu, chto v logu stojala geometrija
+128 ekspertov vmesto 512. S teh por skript posle KAZHDOGO prohoda chitaet iz loga imja fajla,
+kotoryj realno otkryl zagruzchik, i sveriaet s tem, chto prosili (`Assert-Model`); nesovpadenie -
+otkaz vsluh i znachenie otbrosheno. Moral ta zhe: **pravdopodobnyj log nichego ne dokazyvaet**,
+poka ne skazano, chto imenno bylo otkryto.
+
+**VYVOD.** Diagnoz plana podtverzhdjon s toj storony, s kotoroj ego mozhno bylo podtverdit za
+odin vecher: nositel modeli meniaet vremja prohoda v 3,05 raza, i eto samyj krupnyj izmerennyj
+rychag na segodnja. Na korotkoj generacii on ne viden, potomu chto tam uzhe rabotaet kesh, a ne
+disk. Sled snjat i prigoden - dalshe vsjo sravnenie predskazatelej idjot oflajn, bez mashiny.
