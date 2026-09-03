@@ -6292,3 +6292,32 @@ Sostojanie na sgenerirovannyh tokenah v damp ne popadaet: on pishetsja srazu pos
 
 Instrumenty: `bench/dbg_hidden.ps1` (proverka bez peremennoj + snjatie), `bench/dbg_hidden_lab.ps1`.
 Vyvod - `D:/MemeX/results/hidden_lab_coder_next.txt`.
+
+
+## KOORDINATOR, 3 sentjabrja 23:xx: SIMULJACIJA SHEMY CELIKOM (bench/system_sim.py)
+
+Vhod: sled route_trace_h.bin i damp skrytyh sostojanij hidden_trace.bin (odin progon, 1900 tokenov),
+marshrutizatory iz GGUF, zatravka iz trjoh chuzhih sledov. Shema: rezidentnost C ekspertov na sloj
+po chastote (zatravka + dokument, obnovlenie raz v 16 tokenov) + predzagruzka B ekspertov sloja l+4
+po R1 (marshrutizator l+4 na sostojanii l plus popravka 513x512, obuchena na pervoj polovine).
+Polosa SSD 380 chtenij/s => pri 70 ms na token bjudzhet 26,6 chtenij.
+
+    C/512  B   sinhr.promahov/token: sred / holod(200) / 2-ja polovina | chtenij SSD/token | ms sinhr. (2-ja pol.)
+    256    0        9,49 / 63,55 / 1,30                                    9,5                4,7
+    256   16        1,98 /  8,86 / 0,92                                   19,5                3,3
+    320    0        6,21 / 43,73 / 0,69                                    6,2                2,5
+    320   16        1,23 /  5,97 / 0,52                                   13,2                1,9
+    410    0        2,67 / 18,89 / 0,34                                    2,7                1,2
+    410   16        0,55 /  2,62 / 0,26                                    6,1                1,0
+    B=32 pri ljubom C prevyshaet polosu SSD (60-80 pustyh chtenij na token) - ne brat.
+
+Vyvody: (1) pri 80% rezidentnyh (IQ3_XXS posle statiki na karte, ili IQ4_XS v luchshem sluchae)
+ustanovivshijsja rezhim stoit ~1 ms/token s SSD, holodnyj start ~10 ms - zadacha urovnej reshena
+na bumage; (2) pri 62% (320) - 1,9 ms i 22 ms na holode; (3) predzagruzka B=16 na 4 sloja vperjod
+snizhaet holodnyj start v 7 raz, ejo cena - 6-13 chtenij/token, v bjudzhete; (4) parametry dlja
+shaga 4: C po dostupnoj OZU, B=16, k=4, period 16, zatravka s kalibrovochnogo korpusa.
+
+NE IZMERENO / optimistichno: kolonka "holod" pri B>0 optimistichna (R1 obuchen na pervoj polovine);
+zaderzhka chtenija ne modeliruetsja (schitaetsja, chto 4 sloja ~5 ms hvataet na 2,7 ms chtenija -
+proverit v dvizhke); perenos R1 na drugoj tekst; sgenerirovannye tokeny; stoimost R1 v dvizhke
+(odin matvektor 2048x512 + 513x512 na sloj, ~2 MiB f16 popravok na vsju model).
