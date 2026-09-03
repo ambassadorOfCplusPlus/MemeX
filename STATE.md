@@ -5407,3 +5407,51 @@ sostojanija - drugoj nabor operacij, i rabota tam bolshe, chem byla u gemmy.
 
 To est plan raspadaetsja na dva shaga s raznoj cenoj: deshevyj (964 MB togo, chto karta umeet,
 +1,6 tok/s) i dorogoj (delta-set na kartu, eshchjo +4,2 tok/s).
+
+## CODER NEXT: geometrija snjata polnostju, port obozrim
+
+Dvizhok otkazal chestno: "arhitektura qwen3next ne podderzhivaetsja etim dvizhkom; podderzhany
+qwen3moe, gemma4, qwen35moe". I pripiska vernaja: na chuzhoj arhitekture graf vydal by ne oshibku,
+a uverennuju chepuhu.
+
+**No pisat delta-set s nulja NE NADO: ona u nas uzhe est** - `build_qwen35_step` dlja qwen35moe.
+I u forka est polnyj etalon `src/graphs/build_qwen3next.cpp` (89 strok, delegiruet v
+llama-delta-net.h), to est est i obrazec, i sverka cherez llama_decode.
+
+### Geometrija qwen3next (Qwen3-Coder-Next-UD-IQ3_XXS, 28,5 GB)
+
+    48 sloev, full_attention_interval 4  =>  vnimanie na slojah 3,7,11...47 (12), ostalnye 36 - delta-set
+    n_embd 2048, golovy 16/2 po 256, rope 64 iz 256 @ 5e+06
+    MoE na KAZHDOM sloe: 512 ekspertov, top-10, shirina eksperta 512
+      plus OBSHCHIJ ekspert (512) so svoim gejtom ffn_gate_inp_shexp
+    PLOTNOJ FFN NET VOVSE (feed_forward_length 5120 zajavlen, no tenzorov ffn_up/gate/down net)
+    ssm: conv_kernel 4, group_count 16, inner_size 4096, state_size 128, time_step_rank 32
+
+    delta-set sloj:  attn_norm, post_attention_norm, attn_qkv [2048,8192], attn_gate [2048,4096],
+                     ssm_ba [2048,64], ssm_conv1d [4,8192], ssm_a [32], ssm_dt.bias [32],
+                     ssm_norm [128], ssm_out [4096,2048]
+    sloj vnimanija:  attn_q [2048,8192], attn_k [2048,512], attn_v [2048,512],
+                     attn_output [4096,2048], attn_q_norm/k_norm [256]
+
+### Diff s qwen35moe, kotoryj my UZHE podderzhivaem
+
+    u qwen3next est, u qwen35moe net:  SSM_BETA_ALPHA (slitye vmesto alpha+beta), SSM_IN,
+                                       FFN_DOWN/GATE/UP (plotnaja FFN - u NASHEJ modeli otsutstvuet)
+    u qwen35moe est, u qwen3next net:  NEXTN_* (tenzory MTP-golovy)
+    sovpadajut:  ATTN_QKV, ATTN_GATE, SSM_OUT, SSM_CONV1D, SSM_DT, SSM_NORM, SSM_A_NOSCAN,
+                 obshchij ekspert, marshrutizatory, normy
+
+`ssm_ba [2048, 64]` pri time_step_rank 32 - eto 32 beta + 32 alpha, to est delitsja PO
+SMESHCHENIJU. Etot prijom u nas uzhe otrabotan na `ffn_gate_up_exps` gemmy (PlainSrc::stride/sub).
+
+### Chto ostajotsja sdelat
+
+  1. Chtenie hparams qwen3next (full_attention_interval, ssm_*).
+  2. Zagruzka nabora tenzorov, s razdeleniem ssm_ba po smeshcheniju.
+  3. `build_qwen3next_step` - adaptacija build_qwen35_step: slitoe ba vmesto alpha/beta,
+     bez NEXTN, bez plotnoj FFN.
+  4. Sverka cherez --decode-check protiv llama_decode (etalon u forka est).
+
+**Ogovorka po pamjati:** 28,5 GB pri 31,9 GB OZU - model ne vlezaet celikom, i chtenija pojdut s
+HDD (23,3 ms na sluchajnyj blok). Progon budet medlennym, no dlja SVERKI etogo dostatochno:
+korrektnost ot skorosti ne zavisit.
