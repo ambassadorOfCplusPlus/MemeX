@@ -5749,3 +5749,134 @@ poka ne skazano, chto imenno bylo otkryto.
 odin vecher: nositel modeli meniaet vremja prohoda v 3,05 raza, i eto samyj krupnyj izmerennyj
 rychag na segodnja. Na korotkoj generacii on ne viden, potomu chto tam uzhe rabotaet kesh, a ne
 disk. Sled snjat i prigoden - dalshe vsjo sravnenie predskazatelej idjot oflajn, bez mashiny.
+
+
+## REESTR ARHITEKTUR: DEVJAT TERNARNIKOV SVEDENY V ODNU TOCHKU
+
+Sdelano (shag 2 plana). V `memex-fwd.cpp` pojavilis `ArchModel` (kakoj nabor vesov zapolnen i
+chto stroitel umeet), `BuildOpts` (vse specifichnye parametry odnoj strukturoj s imenami polej)
+i `build_any()`. Cherez nejo teper idut VSE devjat tochek postroenija grafa i sam
+`Generator::build_one`, kotoryj do etogo byl edinstvennym polnym dispetcherom v fajle.
+
+Tochki, kazhdaja s sobstvennym imenem v otkaze:
+
+    prefill, prefill_tail, decode, rdec, spec_width, spec_one, zoned, compare, dense_ref,
+    generator
+
+**Pjat iz devjati imeli tolko DVE vetki.** Eto ne teoreticheskaja opasnost: tot zhe rod
+oshibki uzhe dvazhdy davala rabotajushchij graf s drugim otvetom (chetyre zhjostkih vyzova
+build_step do gemma4; `arch_g4 ? w4.out : w.out` dlja golovy Coder Next). Ohrany po imeni
+arhitektury stojali v drugom meste, chem sami vetki, i rashodilis oni imenno tak.
+
+**Chto teper otkazyvaet VSLUH, a ranshe molcha popadalo v chuzhoj stroitel ili terjalos v
+argumente po umolchaniju:**
+
+    tochka rdec       + qwen35moe/qwen3next : rasshcheplenie rezidentnyh ekspertov ne
+                                              podderzhano (ResidentSet ne schitaet obshchego
+                                              eksperta) - ranshe upalo by v build_step
+    tochka spec_width + qwen35moe/qwen3next : povtornyj progon grafa portit perenosimoe
+                                              sostojanie (lovushka 7.5) - ranshe build_step
+    tochka spec_one   + qwen35moe/qwen3next : to zhe
+    tochka zoned      + ljubaja krome qwen3moe : zonnyj kesh
+    ljubaja tochka    + gemma4/qwen35moe s --min-experts ili --expert-thresh : eti stroiteli
+                                              takih parametrov ne prinimajut vovse, i flag
+                                              tiho nichego ne delal
+    ljubaja tochka    + arhitektura bez opisanija v reestre : otkaz vmesto vetki po umolchaniju
+
+Tuda zhe ushli dva poslednih mesta, gde struktura vesov vybiralas vruchnuju: golova dlja karty
+(`am.head()` vmesto trjohvetochnogo ternarnika) i `Generator::init`, kotoryj teper prinimaet
+`ArchModel` vmesto chetyrjoh ukazatelej s dvumja znachenijami po umolchaniju.
+
+**Zagruzchik v reestr NE sveden.** `collect / collect_gemma4 / collect_qwen35 / collect_dense`
+ostalis kak byli: eto tri otdelnyh spiska imjon tenzorov po pjatsot strok, i svodit ih v odnu
+tablicu - otdelnaja rabota s otdelnoj sverkoj. Vybor mezhdu nimi (`if (arch_q3) got = ...`) -
+tri stroki podrjad, a ne ternarnik, i tretja arhitektura iz nego ne vypadaet.
+
+### Dve pravki po revju, v tom zhe fajle
+
+**Pisatel sleda `MEMEX_EXPERT_TRACE`** lezhal VNUTRI `if (getenv("MEMEX_MTP_OVERLAP"))`. Po
+shtatnoj komande iz HANDOFF_ROUTER sled ne pisalsja vovse - fajl ne pojavljalsja i ni odnoj
+stroki ob etom ne pechatalos. Vynesen pod svoj flag.
+
+**Kopija marshrutizacii naruzhu v `build_qwen35_step`** stroilas BEZUSLOVNO: 48 lishnih uzlov
+(cont + set_output + expand) i 48 ZAKREPLENNYH tenzorov na kazhdyj token, kotorye gallocr ne
+mozhet pereispolzovat. U qwen3moe i gemma4 ta zhe kopija stoit pod `rwarm`. Teper flag
+`want_sel`, kotoryj harness stavit po tomu zhe priznaku, po kotoromu vydeljaet `rsel`
+(`--resident` / `MEMEX_EXPERT_COVERAGE` / `MEMEX_EXPERT_TRACE`), i sprashivaetsja on DO
+postroenija grafa prefilla - ot nego zavisit sam graf. Zaodno: "marshrutizaciju sprosili, a
+graf ejo ne otdal" teper pechataetsja, a ne propuskaetsja tiho.
+
+### Sverka do/posle: `--decode-check 16`, tri modeli
+
+    qwen3moe (mx1)   16 shagov: pozicii, L2 i tokeny sovpadajut DO ZNAKA
+    gemma4           16 shagov: pozicii, L2 i tokeny sovpadajut DO ZNAKA
+    qwen3next        16 shagov: VSE 16 TOKENOV te zhe, no L2 SDVINULIS
+
+    --gen 8 --no-ref: tokeny generacii sovpadajut na vseh trjoh modeljah
+      mx1     279 1946 323 26569 892 11647 311 6021
+      gemma4  107 902 236772 16043 236772 13883 236772 20746
+      next    1817 3950 323 49143 264 2613 1372 315
+
+Sdvig L2 u qwen3next - **ne shum i ne sluchajnost, a sledstvie vtoroj pravki**: u etoj
+arhitektury graf dejstvitelno drugoj (48 zakreplennyh vyhodov na token ushli, raskladka
+gallocr izmenilas). Chisla:
+
+    hudshij shag (4):  10,1875% -> 10,5839%
+    prefill odnim prohodom: 8,4314% -> 8,7740%
+    soglasie s etalonom: 14 iz 16 shagov V OBOIH sluchajah, hudshij shag tot zhe
+    otdelnye shagi guljajut do dvuh punktov v OBE storony (shag 2: 4,997 -> 6,973;
+                                                            shag 12: 3,510 -> 2,939)
+
+**ETO OTKRYTYJ VOPROS, a ne prinjatyj rezultat.** Perestanovka uzlov i raskladki bufera ne
+dolzhna menjat f32-arifmetiku na CPU. To, chto ona ejo menjaet imenno u ARHITEKTURY S
+PERENOSIMYM SOSTOJANIEM (mx1 i gemma4 sovpali pobitno), ukazyvaet na neuporjadochennoe
+chtenie-zapis bufera `DeltaState`: sloj pishet novoe sostojanie obratno cherez `ggml_cpy`, i
+esli porjadok mezhdu zapisju i chuzhim chteniem derzhitsja nomerom uzla, a ne rebrom grafa, to
+ljuboe izmenenie chisla uzlov ego menjaet. **Sledujushchij zamer**, kotoryj eto reshaet:
+`--decode-check 16 --probe all` na qwen3next do i posle - poslojnoe sravnenie nazovjot sloj, s
+kotorogo nachinaetsja rashozhdenie, i togda vidno, delta-sloj eto ili net. Do etogo zamera
+utverzhdat, chto sdvig bezobiden, nelzja.
+
+### A/B skorosti: mx1, `--gen 8 --no-ref`, plechi cheredujutsja, tri kruga
+
+    do    8,9222 / 9,8752 / 9,3439   srednee 9,3804 tok/s   razbros 10,2%
+    posle 9,9543 / 9,7657 / 9,8473   srednee 9,8558 tok/s   razbros  1,9%
+    raznica srednih 5,07% pri razbrose 10,2%
+
+Raznica VNUTRI razbrosa - **ni uskorenija, ni zamedlenija NE POKAZANO**, chego i trebovalos:
+reestr menjaet vybor stroitelja, a ne arifmetiku.
+
+Odinochnye chisla iz progonov "do" i "posle" (9,05 -> 12,47 na mx1, 4,91 -> 6,67 na gemma4)
+**nedejstvitelny** i v vyvod ne vhodjat: progony "do" byli pervymi posle holodnogo diska, a
+"posle" chitali iz progretogo stranichnogo kesha. Eto lovushka 7.4 v chistom vide, i imenno
+poetomu A/B delaetsja chereduja plechi.
+
+### Tri veshchi, kotorye bez progona ostalis by utverzhdenijami
+
+    1. OTKAZ VSLUH. gemma4 + --min-experts 4:
+       "tochka prefill: arhitektura gemma4 ne podderzhivaet min_experts/porog
+        (prosheno 4 / 1.0000) - OTKAZ"
+       i srazu za nej "граф префилла не собрался" - progon OSTANOVLEN, a ne prodolzhen.
+       Do reestra etot flag s gemma4 tiho nichego ne delal.
+
+    2. SLED PO SVOEMU FLAGU. qwen3next, zadan TOLKO MEMEX_EXPERT_TRACE (ni MTP_OVERLAP, ni
+       COVERAGE): fajl napisan, 61456 bajt, zagolovok (32, 48, 10, 512) - rovno
+       16 + 32*48*10*4. Do pravki po etoj komande fajl ne pojavljalsja vovse.
+
+    3. CHESTNOE "NE IZMERENO". qwen3moe + MEMEX_EXPERT_TRACE bez --resident:
+       "marshrutizacija zaproshena ..., no graf prefilla ejo NE OTDAL: krivaja pokrytija,
+        progrev nabora i sled - NE IZMERENY"
+       U qwen3moe kopiju marshrutizacii stroit rwarm, to est rezidentnyj nabor, i bez nego
+       ejo v grafe net. Ranshe eto byl tihij propusk - pustoe mesto, chitaemoe kak "prognali".
+
+### Chto NE proverjeno
+
+- Tochki `zoned`, `rdec`, `spec_width`, `spec_one` ne gonjalis ni razu: dlja nih nuzhny
+  `--zoned` / `--resident` / `MEMEX_SPEC_WIDTH` na qwen3moe. Proverena tolko ih sborka i
+  peredavaemye argumenty po chteniju, a ne po zameru.
+- `dense_ref` (samoproverka chernovika, `-md`) ne gonjalas.
+- Skorost gemma4 i qwen3next posle pravki chereduja plechi ne merilas - tolko mx1.
+- Iz novyh otkazov vyzvan odin (gemma4 + min_experts). Otkazy
+  `rdec`/`spec_width`/`spec_one` + qwen35moe ne vyzyvalis: do nih ne dopuskajut ohrany po
+  imeni arhitektury, stojashchie vyshe, i chtoby uvidet stroku otkaza, nado snachala snjat ih.
+- Sdvig L2 u qwen3next ne razobran po slojam (sm. vyshe) - eto glavnoe iz nesdelannogo.
