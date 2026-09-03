@@ -5455,3 +5455,49 @@ SMESHCHENIJU. Etot prijom u nas uzhe otrabotan na `ffn_gate_up_exps` gemmy (Plai
 **Ogovorka po pamjati:** 28,5 GB pri 31,9 GB OZU - model ne vlezaet celikom, i chtenija pojdut s
 HDD (23,3 ms na sluchajnyj blok). Progon budet medlennym, no dlja SVERKI etogo dostatochno:
 korrektnost ot skorosti ne zavisit.
+
+## CODER NEXT (qwen3next) PODDERZHAN I SVEREN
+
+Port okazalsja adaptaciej, a ne pisaniem s nulja: delta-set u nas uzhe byla dlja qwen35moe, a u
+forka est etalon `src/graphs/build_qwen3next.cpp` - to est byl i obrazec, i sverka cherez
+llama_decode.
+
+**Pjat pravok:**
+  1. hparams: `if (a == "qwen35moe" || a == "qwen3next")` - klyuchi u nih odni i te zhe.
+  2. Pole `ssm_ba` v Qwen35Weights::Layer.
+  3. Zagruzka: razdelnye ssm_beta/ssm_alpha ILI slityj ssm_ba; ni togo ni drugogo - otkaz.
+  4. Stroitel: slityj put uzel v uzel po etalonu (mul_mat, reshape_4d(2*Hv/Hk, Hk, n_tok, 1),
+     dva view_4d so smeshcheniem 0 i Hv/Hk, cont_4d/cont_3d).
+  5. `arch_q35 = arch == "qwen35moe" || arch == "qwen3next"`.
+
+**Odna oshibka, i ona stoila odnogo celogo chisla.** `res->op_params[0]` - eto `repeat_type`,
+i etalon peredajot `l.ssm_beta_alpha ? 0 : 1` (llama-delta-net.cpp:544): NOL dlja slitoj
+raskladki, EDINICA dlja razdelnoj. U nas stojala zhjostkaja edinica.
+
+    do pravki:  luchshij token prefilla etalon ' each' / nash ' the' - RASHODJATSJA
+                L2 prefilla 61,76%, poshagovaja sverka 1 iz 3, hudshij L2 shaga 63,39%
+    posle:      etalon ' each' / nash ' each' - SOVPAL
+                L2 prefilla 8,43%, sverka 3 IZ 3, hudshij L2 shaga 6,34%
+
+6-8% L2 - eto nasha obychnaja chislennaja raznica: u Qwen 35B rovno takaja zhe (8,43%).
+Prefill: nash 2049 ms protiv etalonnyh 12218 - **v 6,0 raz bystree**.
+
+**Kak nashli - eto put, a ne dogadka.** Dobavleny zondy VNUTRI delta-seti s imenami, kotorye
+emitit etalon (linear_attn_mixed_ba, alpha, beta, gate, conv_output_raw). Sverka dala:
+
+    linear_attn_mixed_ba-0   L2 0,53%   verno
+    alpha-0                  L2 0,76%   verno
+    conv_output_raw-0        L2 0,59%   verno
+    ssm_output-0             L2 14,81%  NEVERNO
+
+To est oshibka lezhala rovno mezhdu svjortkoj i vyhodom sloja, a tam iz kandidatov ostavalas
+odna eta cifra. Otchjot pri etom chestno skazal "NE SVERENO 72: beta-0, gate-0..." - eti uzly
+etalon pod takimi imenami ne vydal, i ih ne vydali za uspeh.
+
+**Model rabotala i do pravki**: ne padala, vydavala pravdopodobnyj tekst, rashodjas s etalonom
+na 14,8% uzhe na PERVOM sloe. Rovno tot vid otkaza, kotoryj lovitsja tolko sverkoj.
+
+**Ostajotsja:** sverka dlinnee trjoh shagov (dvizhok sam ob etom preduprezhdaet); zamer skorosti
+generacii (--gen dlja etoj vetki zakryt iz-za perenosa sostojanija delta-seti mezhdu shagami);
+krivaja pokrytija ekspertov na SAMOM Coder Next - ona nuzhna dlja dvuhurovnevoj raskladki
+OZU+SSD, i mereno pока na gemme (128 ekspertov protiv 512 zdes).
