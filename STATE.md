@@ -6058,3 +6058,66 @@ Podnjato do 1024.
   propuskaet ostalnye, i 1466/1466 - eto "vse ostalnye propushcheny ili podderzhany", a ne
   "vse ostalnye svereny".
 
+
+
+## KOORDINATOR, 3 sentjabrja vecher: laboratorija predskazatelej, cena promaha, zatravka
+
+Vsjo oflajn po sledam (bench/route_lab.py, bench/first_seen.py, bench/hidden_lab.py) i odin zamer
+diska (bench/io_miss_cost.py). Sled: route_trace.bin, 1900 tokenov x 48 x top-10 iz 512.
+
+**Chestnaja metrika - popadanie na SLEDUJUSHCHIJ token, a ne pokrytie zadnim chislom.** Chastota po
+istorii (baza), sred / holodnyj start (pervye 200) / hudshij sloj:
+
+    128/512  95,33 / 84,17 / 86,57      256/512  98,39 / 89,30 / 95,31
+    320/512  98,56 / 89,57 / 96,84      410/512  98,61 / 89,63 / 97,72
+
+**Plato 98,6% pri ljubom bjudzhete** - eto ne jomkost, a PERVYE POJAVLENIJA eksperta v dokumente:
+ih ne dostat nikakim predskazatelem po istorii. Po oknam 100 tokenov (first_seen.py): 0-100 -
+79,5 novyh na token (16,6%), 100-200 - 24,4, 200-300 - 9,4, 300-500 - ~4, posle 500 ustojchivo
+0,6-0,7 na token (~2,5 ms s SSD). Razlichnyh ekspertov na sloj k koncu: srednee 275 (179..431).
+Sledstvie: krivaja pokrytija iz razdela 4 HANDOFF_ROUTER (99,72% pri 256) zavyshala rezidentnost,
+moja zhe ocenka "0,1 promaha na token pri 80%" byla NEVERNA - bez zatravki hvost 7 na token.
+
+**Zatravka s chuzhih tekstov** (chastoty trjoh drugih sledov: code 1044, ru 712, tech 520 tokenov,
+kak nachalnye schjotchiki) probivaet plato:
+
+    bjudzhet   chastota         + zatravka       mezhslojnyj k=1 + zatravka
+    256        98,39 / 89,30    98,79 / 93,06    99,23 / 95,43
+    320        98,56 / 89,57    99,24 / 95,32    99,51 / 96,93
+    410        98,61 / 89,63    99,67 / 98,01    99,68 / 97,78
+
+Obratnaja proverka na slede koda (trudnee: baza 96,68 pri 410): s zatravkoj 99,09 / 98,0.
+Mezhslojnyj predskazatel (sloj l po vyboru sloja l-k togo zhe tokena, tablica sovmestnoj
+vstrechaemosti, uchitsja onlajn) dajot +2,3 punkta pri 128 i podnimaet hudshij sloj s 60 do 82%
+na kode. Tochnost predzagruzki (skolko iz top-10 ugadano pri chtenii B zaranee): pri B=10
+mezhslojnyj 55% protiv 45% u chastoty, pri B=64 - 93,6 protiv 86,9.
+
+**Cena promaha izmerena mimo kesha (NO_BUFFERING, OVERLAPPED), pod zamkom:**
+
+    SSD C:  kusok 0,32 MiB 1,07 ms, 0,38 MiB 1,30 ms, ekspert 1,03 MiB 2,74 ms;
+            polosa 310-415 MB/s i NE RASTJOT s glubinoj ocheredi 1..16 (zaderzhka rastjot linejno)
+    HDD D:  kusok 14-16 ms, ekspert 1,39 MiB 21,4 ms; QD tolko huzhe (p90 do 175 ms)
+    HDD cherez mmap (kak platit dvizhok sejchas): 22,9 ms za 1,39 MiB = prjamoe chtenie, mmap ne vinovat
+
+Sledstvie: SSD-uroven dajot ne bolee ~380 ekspertov/s (~38 na token pri 100 ms), i tolko pri
+perekrytii so schjotom; HDD kak uroven bespolezen; sobstvennoe hranilishche vmesto mmap radi
+skorosti promaha NE nuzhno - nuzhno radi repaka R4 i zakreplenija.
+
+**Predskazatel po skrytomu sostojaniju** (bench/hidden_lab.py): format dampa MEMEX_HIDDEN_TRACE
+(int32[4] n_tok,n_layer,n_embd,dtype; telo f16 [token][layer][n_embd] = vyhod ffn_norm), sposoby
+R0 (marshrutizator sloja l+k na sostojanii sloja l, nol novyh vesov), R1/R2 (grebnevaja
+regressija). Samoproverka na sluchajnyh dannyh: k=0 dajot 100%. **Na modeli NE izmereno**: dampa
+ejo net, ego pishet dvizhok (dobavit posle togo, kak memex-fwd.cpp osvoboditsja).
+
+**Shtatnyj fork s -ngl 99 -ot exps=CPU na mx1: 10,24 / 10,89 / 10,92 tok/s (sred 10,68, razbros
+6,4%)**; nashe plecho v toj zhe serii parser ne razobral, i serija mogla peresechsja s chuzhoj
+diagnostikoj - PEREMERIT chistym krugom. Istoricheski nash dvizhok na mx1 18,5-19,7.
+
+Chego ne izmereno: stoimost samih predskazatelej v dvizhke; sledy snjaty na nashih promtah, a ne
+na sobstvennom prodolzhenii modeli; zatravka iz 2300 tokenov - malo, nuzhen kalibrovochnyj korpus;
+30B-sled (moe_trace.bin) dal tu zhe kartinu (mezhslojnyj +6..11 punktov pri malyh bjudzhetah), no
+eto drugaja model.
+
+Zagrjaznenie, priznano: moj python vne zamka (19:44-19:49) isportil krugi 1-2 A/B shaga 1;
+osirotevshij find.exe ot revju-agenta 37 minut livlochil ochered zamka. Pravilo: vsjo tjazhjoloe
+tolko pod zamkom, subagentam - nikakih poiskov ot kornja.
