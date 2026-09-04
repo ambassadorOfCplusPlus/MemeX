@@ -35,3 +35,4 @@ kaggle.json
 # Tool droppings
 .playwright-mcp/
 github-data/
+regress/
