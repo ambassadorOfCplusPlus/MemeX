@@ -7105,3 +7105,50 @@ SLEDUJUSHCHEE: pereizmerit predzagruzku shaga 5 s r1_corr_multi vmesto odnodokum
 used/issued: bylo 1,33/27, teper R1 luchshe perenositsja). No B=16 > top-k=10 vsjo ravno pereizbytochen
 i SSD ogranichen polosoj - realnyj vyigrysh zhdat na IQ4_XS (ne vlezaet v OZU) i holodnom starte, ne na
 IQ3_XXS ustanovivshemsja (tam i tak 0,14 promaha/token). Svip B=10..16 stoit sdelat.
+
+
+## REFAKTORING SHAG 0: CEL-BIBLIOTEKA memex_core ZAVEDENA (fork commit e92bb94b, 5 sentjabrja)
+
+Pervyj, samyj bezopasnyj shag razbienija dvizhka (docs/refactor_plan.md, shagi 0-1): zavesti
+biblioteku libmemex/memex_core i perevesti v nejo to, chto UZHE obosobleno, BEZ izmenenija povedenija.
+
+CHTO VYNESENO CHISTO (vsjo chetyre fajla, nol pravok koda/zagolovkov):
+- resident_set.cpp + expert_store.cpp - bezuslovno v memex_core. Zavisjat tolko ot ggml + stdlib.
+- gpu_experts.cpp + gpu_static.cpp - v memex_core pod GGML_VULKAN (tot zhe gejt chto ranshe u exe).
+Proverka zavisimostej: ni odin iz chetyrjoh ne vkljuchaet zagolovok memex-fwd.cpp; imena struktur
+memex-fwd (HParams/Graph/Weights/DenseWeights/Gemma4Weights/Qwen35Weights/Cache/DeltaState/ArchModel/
+BuildOpts) vstrechajutsja v nih TOLKO v prozaicheskih kommentarijah (gpu_static: 3 v .cpp, 3 v .hpp -
+"Graph::KvRead", "hostovyj DeltaState" i t.p.), nikogda kak tip v kode. Poetomu vynos ne potreboval
+NI ODNOGO novogo zagolovka (memex_types.hpp ne ponadobilsja).
+Compile-defs: iz treh MEMEX_FWD_* tolko MEMEX_FWD_VULKAN nuzhen etim fajlam (gpu_experts.cpp, raw
+vulkan pod #ifdef) - probroshen v biblioteku. MEMEX_FWD_GPU_EXPERTS i MEMEX_FWD_ZONED nuzhny tolko
+memex-fwd.cpp - ostalis na celi exe doslovno.
+
+CMake (examples/memex-fwd/CMakeLists.txt): add_library(memex_core STATIC ...); PUBLIC ggml (probros
+include-katalogov ggml.h/ggml-backend.h/ggml-vulkan.h); pod GGML_VULKAN+Vulkan_FOUND - PRIVATE
+Vulkan::Vulkan + MEMEX_FWD_VULKAN. Exe: MEMEX_FWD_SRC = tolko memex-fwd.cpp, linkuet memex_core
+pered common/llama/ggml. Compile-defs exe sohraneny bez izmenenij.
+
+CHTO OSTALOS SVJAZANO S memex-fwd.cpp (dlja SLEDUJUSHCHIH shagov 2-4 plana, NE tronuto v etom shage):
+struktury zhivut v anonimnom namespace vnutri memex-fwd.cpp i poka NE vyneseny:
+- HParams + LayerKind/LayerGeom (blok C), read_hparams/key_* (D)  -> shag 2 -> include/memex/hparams.hpp
+- Weights/DenseWeights/Gemma4Weights/Qwen35Weights + collect_* (F,G) -> shag 2 -> weights.hpp
+- Graph + set_graph_inputs (H), Cache/KvBytes (I), DeltaState (J)  -> shag 3 -> graph.hpp/cache.hpp
+- ArchModel/BuildOpts/build_any (M) + builders L1-L5 -> shag 4 (vysshij risk: porjadok uzlov grafa)
+Eti tipy poka ispolzujutsja TOLKO vnutri memex-fwd.cpp (biblioteka ih ne vidit), poetomu razryv
+mozhno delat pozzhe zagolovkami, kak namecheno v plane. gpu_static/gpu_experts obshchajutsja s grafom
+cherez svoi .hpp (tenzory/callbacks), a ne cherez eti struktury napryamuju - poetomu i vynosjatsja
+chisto uzhe sejchas.
+
+SVERKA (pod zamkom, build_safe -Targets llama-memex-fwd -Dir build-vk):
+- Sborka godna: exe slinkovan s memex_core, --version exit 0 (transientnoe propadanie ggml.dll/
+  llama.dll v cepochke - izvestnaja MSBuild-osobennost, avtovosstanovleno iz dll_vault, "sborka godna").
+- Tokeny: --decode-check 16, LLAMA_MMAP_PREFETCH=0 -t 8 --no-repack, na treh modeljah (mx1, gemma4,
+  Coder-Next IQ3_XXS). Sravnenie ids protiv golden_decode.json: qwen3moe_mx1 16/16, gemma4 16/16,
+  qwen3next 16/16 - BAJT-V-BAJT. Refaktoring ne izmenil ni odnogo tokena.
+  (Zamechanie: bench/regress_tokens.ps1 vydal "NET ETALONA" - ne smog prochitat golden cherez
+  ConvertFrom-Json; eto predsushchestvujushchij bag skripta, ne moj fajl, sverjal ids vruchnuju
+  protiv golden_decode.json. regress skript ne pravil - zadacha: tolko examples/memex-fwd/*.)
+
+NE SDELANO (po planu, sleduet dalshe): shag 1 (vynos ggml_util E + sampler P/S), zatem shagi 2-4
+(struktury vyshe). Attention/moe-faktorizacija (shag 9) - opcionalno, v konce.
