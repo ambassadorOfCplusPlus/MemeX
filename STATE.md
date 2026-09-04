@@ -6444,3 +6444,17 @@ NE IZMERENO: vlijanie na dlinnuju generaciju (tysjachi tokenov) - lenivye oshibk
 otygrat chast vyigrysha na hvoste, zdes 64 tokena; promezhutochnye znachenija N (naprimer 2G na
 statiku) ne merjalis - tolko 0 protiv "kak bylo"; chislo promahov stranic i rabochij nabor processa
 ne pechatajutsja; llama-cli ne proverjalsja (ruchka v llama.dll, tak chto dolzhna rabotat i tam).
+
+
+## KOORDINATOR, 4 sentjabrja 15:20: CHEREDOVANIE PLECH S RAZNYMI RABOCHIMI NABORAMI TRAVIT KESH
+
+Agent prefetch-flaga progonjal karточный put podrjad (--gen 64, IQ3_XXS s C:, --gpu-static-layers):
+7,67 / 7,84 / 7,86 / 7,94 tok/s = ~127 ms/token, razbros 3,6%. Moj A/B chasom ranshe s CHEREDOVANIEM
+karta/CPU dal 3,63 / 4,23 (254 ms) - vdvoe medlennee pri tom zhe binarnike i teh zhe flagah.
+Ob"jasnenie: CPU-plecho trogaet 1,7 GiB statiki, kartochnoe - net; pri modeli bolshe kesha kazhdoe
+plecho vytesnjaet chast ekspertov drugogo. Cheredovanie (objazatelnoe po lovushke 7.4 protiv
+progreva) zdes samo vnosit oshibku. Pravilo: dlja plech s raznymi rabochimi naborami pechatat
+i kontrol "odno plecho podrjad", i tolko ustanovivsheesja znachenie schitat skorostju; s
+hranilishchem shaga 4 (eksperty v privatnoj pamjati) etot effekt dolzhen ischeznut - proverit.
+Utochnjonnaja ocenka karty segodnja: ~127 ms/token = 43 karta + 3 golova + ~80 CPU-eksperty i
+chtenija; do ocenki 70 ms ne hvataet imenno chtenij.
