@@ -7152,3 +7152,25 @@ SVERKA (pod zamkom, build_safe -Targets llama-memex-fwd -Dir build-vk):
 
 NE SDELANO (po planu, sleduet dalshe): shag 1 (vynos ggml_util E + sampler P/S), zatem shagi 2-4
 (struktury vyshe). Attention/moe-faktorizacija (shag 9) - opcionalno, v konce.
+
+
+## PREDZAGRUZKA S SHIROKIM KORPUSOM (r1_corr_multi): MEHANIZM RABOTAET, PLATIT NA MEDLENNOM UROVNE (5 sentjabrja 00:40)
+
+step5_prefetch.ps1 -Corr r1_corr_multi.bin -Cap 320 -Gen 48 podrjad:
+    store [tolko hranilishche]:  197 ms/token, popadanij 95,27%, sinhr.promahov 22,69/token (81,5 ms)
+    prefetch_async:              197 ms/token, popadanij 98,29%, sinhr.promahov  8,23/token (42,9 ms)
+    prefetch_sync:               287 ms/token, te zhe promahi (async prjachet zaderzhku: -90 ms)
+    used/issued 9,25/36,31 = 25% (bylo 5% s odnodokumentnym r1_corr - shirokij korpus vpjatero luchshe)
+
+VYVOD: predskazatel RABOTAET s pravilnymi vesami - popadanij 98,3%, sinhr.promahov -64% (22,7->8,2),
+async perekrytie ekonomit 90 ms protiv sync. NO na IQ3_XXS skorost ploskaja: predzagruzka chitaet
+BOLSHE summarno (36 protiv 22,7), a SSD ogranichen POLOSOJ - menjaem zaderzhku sinhr.promahov na
+obem chtenij, na SSD eto v nol.
+
+GDE PLATIT: na MEDLENNOM urovne. Sprjatannyj promah na SSD stoit 2,7 ms, na HDD 23 ms. Na IQ4_XS
+(lishnie eksperty ne vlezajut v OZU, padajut na HDD) sokrashchenie 22,7->8,2 = 14 x 23 = 330 ms/token
+ekonomii. Predzagruzchik nuzhen imenno tam, ne na IQ3_XXS v OZU. Svip B->10 (blizhe k top-k) srezal by
+27 pustyh chtenij/token - stoit sdelat, no polosa ostanetsja stenoj na SSD.
+
+ITOG PO PREDSKAZATELJU: mehanizm veren, obobshchaetsja (perenos 86%), sinhr.promahi rezhet vtroe,
+async objazatelen. Cennost - IQ4_XS i lyuboj HDD-uroven, gde promah dorog. r1_corr_multi.bin - boevoj.
