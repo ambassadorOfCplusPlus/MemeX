@@ -6950,3 +6950,42 @@ rezultat, a ne otkaz:
 Vyvod: 48 peresechenij/token strukturny, poka marshrutiziruemye eksperty na CPU (24,6 GiB protiv 4 GB
 VRAM). Karta ~43 ms/token ne snizhaema etim putjom. Vyvod q6_K ("rychag - peresechenija") veren po
 diagnozu, no sami peresechenija na granice karta/CPU neustranimy bez perenosa ekspertov na kartu.
+
+
+## PRODUKTIZACIJA SHAG 1: SHTATNYJ llama-server SOBRAN, BAZA mx1 CHEREZ NEGO, KARTA VSTRAIVANIJA (server-poc, 4 sentjabrja)
+
+Pervyj proverjaemyj shag prevrashchenija harnessa v dvizhok cherez SHTATNYJ server foreka (ne svoj).
+Fajly examples/memex-fwd/* NE trogal (ih pravjat drugie agenty). Polnaja karta v
+docs/server_integration_map.md.
+
+- **Server sobran.** Cel `llama-server` uzhe est v cmake foreka (examples/server/CMakeLists.txt:1).
+  build_safe.ps1 -Targets llama-server -Dir build-vk -> bin/Release/llama-server.exe (~8 MB), Vulkan ON,
+  zapuskaemost proverena. Otdelnyj flag cmake ne nuzhen.
+- **Baza mx1 cherez server (pod zamkom).** llama-server -ngl 99 -ot exps=CPU -fa off na
+  Qwen3-Coder-30B-A3B-mx1.gguf: **dekod 10,85 i 11,35 tok/s** (razbros ~5%), prefill ~13,2 tok/s.
+  Eto vosproizvodit "shtatnyj fork s -ot ~10,7" iz plana i VDVOE nizhe nashego ruchnogo puti ~19 tok/s.
+  VYVOD razvilki: na etoj karte (BAR-okno 256 MiB) ruchnaja raskladka GpuStatic NESUSHCHAJA, ne
+  izbytochnaja. SSE-strim rabotaet (16 data-chunkov + [DONE]), OpenAI-sovmestimost rabotaet, sempler
+  zhivoj (temp=1.2 seed1!=seed2 => raznyj tekst), temp=0 determinirovan.
+- **Karta vstraivanija 5 mehanizmov (fajl:stroka):** (a) golova gpu_static -> build_output finalnyj
+  llm_build_lora_mm, llama-build-context.cpp:2732; (b) sloj gpu_static -> build_std_attention
+  build_qwen35.cpp:43 / llama-build-context.cpp:3222 (patch-logika, tolko 1 slot); (v) ExpertStore ->
+  uzel id->slot mezhdu ffn_moe_topk (:1681) i mul_mat_id (:1764/1767/1802) v llm_build_moe_ffn; (g)
+  kolcevoj KV -> alloc cache.k_l llama.cpp:1428; (d) R1-predskazatel -> vhod moe_ffn :1562, vyhod
+  cparams.prefetch_experts (flag --prefetch-experts est, no eto BEZUSLOVNYJ read-ahead vseh ekspertov
+  na Linux, NET vhoda "spisok predskazannyh" - selektivnyj put nado pisat).
+- **Risk shiriny dekoda podtverzhdjon kodom.** Server batchit RAZNYE seq v odin decode:
+  common_batch_add(..., { slot.id }) server-context.cpp:3563, batch_view n_tokens>1 v
+  process_batch_tokens :4647-4664. Nash put karty trebuet ne[1]==1 i odnu posledovatelnost. Razvjazka
+  (variant A): gejt po odinochnomu slotu (--parallel 1), na multislote otkat na shtatnyj graf; u
+  servera uzhe est server_speculative_requires_single_slot :79. Karta smykaetsja so spekuljativnym
+  layer_width, multipolzovatelskij batch - shtatnym grafom.
+- **POC (bez pravki zapreshchjonnyh fajlov).** memex_cc (rezidentnyj bonus = nash ResidentSet, uzhe
+  vkompilirovan v jadro, llama-build-context.cpp:1646) podkljuchjon v shtatnyj server TOLKO cherez env
+  (MEMEX_CACHE_BONUS=5.0 + MEMEX_RESIDENT_FILE maska 64/128). Banner "MemeX: bonus rezidentnym 5.000,
+  maska 48 x 128" v graf init (nodes=2021), greedy vyhod A!=B (baseline "Paris..." -> "France is France
+  is..."). Mehanizm nabljudaemo smestil marshrutizaciju cherez servernyj put. Dokazan kontrakt
+  "mehanizm = opcija".
+- **V ochered (posle shaga 5, ne delal - chuzhie fajly):** vynos gpu_static/expert_store/resident_set v
+  libmemex; tipizirovannyj memex_hooks v llm_build_context s probrosom v build_output/llm_build_moe_ffn/
+  bilder sloja; perenos pooktokennoj orkestracii (set_step/upload_kv/observe/end_token) v update_slots.
