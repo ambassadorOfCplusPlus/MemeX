@@ -6321,3 +6321,46 @@ NE IZMERENO / optimistichno: kolonka "holod" pri B>0 optimistichna (R1 obuchen n
 zaderzhka chtenija ne modeliruetsja (schitaetsja, chto 4 sloja ~5 ms hvataet na 2,7 ms chtenija -
 proverit v dvizhke); perenos R1 na drugoj tekst; sgenerirovannye tokeny; stoimost R1 v dvizhke
 (odin matvektor 2048x512 + 513x512 na sloj, ~2 MiB f16 popravok na vsju model).
+
+
+## SHAG 3b ZAKRYT: VSJA STATIKA CODER NEXT NA KARTE (kommit dvizhka c3a72667, 3 sentjabrja 23:09)
+
+Agent shaga 3b upal po limitu sessii do zapisi v STATE.md; razdel sobran koordinatorom 4 sentjabrja
+iz soobshchenija kommita i logov D:\MemeXesults\step3b\.
+
+Sdelano: gpu_static stroit graf NA SLOJ PO EGO RODU - 36 sloev gejted delta-seti (wqkv, gate,
+conv1d, dt, a, ba, norm, out; bez KV) i 12 sloev vnimanija (wq dvojnoj shiriny s gejtom, chastichnyj
+MROPE-rope, t_pos_ [4W]); obshchee - normy, marshrutizator, OBSHCHIJ EKSPERT. Karta vozvrashchaet
+odnim zaborom chetyre velichiny: ostatok, ego normu (vhod ekspertov), vyhod obshchego eksperta,
+syrye logity marshrutizatora; hostu ostajotsja mul_mat_id i dva slozhenija v porjadke qwen35_ffn.
+ODNO peresechenie na sloj (izmereno: 384 na 8 tokenov = 48,0/token). Sostojanie delta-seti na
+karte (2,09 MiB/sloj, 75,4 MiB), posle prefilla na CPU podnimaetsja odin raz (upload_delta).
+KV tolko dlja 12 sloev vnimanija. Otkat bufera s host-visible na device-local teper pechataetsja.
+Ispravlen defekt supports_op u DELTA_NET (proverka nb[0] otkazyvala edinstvennuju formu modeli;
+1469/1469 test-backend-ops s raskladkoj sloja).
+
+Raskladka videopamjati (IQ3_XXS): golova 264 MiB + dva bufera sloev po 797,67 MiB = 1859,3 MiB,
+vse tri vne BAR; zagruzka na kartu 1642 ms.
+
+Sverka (prompt_micro, 32 tokena, --decode-check 16, po soobshcheniju kommita):
+    vse 48 sloev na karte:            15 iz 16 tokenov etalona, hudshij L2 8,35%
+    processornyj put togo zhe binarnika: 11 iz 16, hudshij L2 16,49%   <-- RASHODITSJA s 15/16 i 9,11%
+                                                                            u dbg-layout; PEREPROVERJAETSJA
+    odin sloj delta-seti na karte:    tokeny = processornyj put; odin sloj vnimanija: 6 shagov podrjad
+    --gpu-static-verify:              696 slotov na 48 slojah pobajtno
+
+A/B (step3b_ab.ps1, --gen 8 posle 32 tokenov, plechi cheredovalis, 3 kruga):
+    karta: 6,32 / 7,56 / 7,62 tok/s  srednee 7,17  razbros 18%   (131-158 ms/token)
+    CPU:   5,24 / 5,18 / 5,38        srednee 5,27  razbros  4%   (186-193 ms/token)
+    Karta bystree na ~36%. Raspredelenija ne peresekajutsja (min karty 6,32 > max CPU 5,38).
+
+Razbor tokena na karte (krug 3, 131 ms): 48 peresechenij x 0,889 ms = 42,7 ms na ustrojstve
+(0,877 ustrojstvo + 0,007 podjom + 0,004 zabor), golova 2,9 ms, ostalnoe ~85 ms - CPU-eksperty
+(~26,5 po ocenke) i chtenija s diska. OCENKA 70 ms/token NE DOSTIGNUTA, i prichina izmerima:
+--gen 8 posle promta v 32 tokena meryaet HOLODNYJ START - kazhdyj novyj token trogaet
+eksperty, kotoryh prefill ne kasalsja (first_seen.py: 80 novyh na token v pervoj sotne), po
+3,4 ms s SSD kazhdyj. Sledujushchij zamer: --gen 64, skorost hvosta.
+
+NE IZMERENO: IQ4_XS na karte; peresechenie 0,889 ms na sloj protiv ozhidanija ~0,5 (33 MiB pri
+67 GB/s) + 0,2 dispatchej - est zapas ~0,2 ms x 48 = 10 ms/token, ne razobran; zatraty OZU
+processa i chislo promahov stranic ne pechatajutsja.
