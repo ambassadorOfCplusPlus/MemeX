@@ -6326,7 +6326,8 @@ proverit v dvizhke); perenos R1 na drugoj tekst; sgenerirovannye tokeny; stoimos
 ## SHAG 3b ZAKRYT: VSJA STATIKA CODER NEXT NA KARTE (kommit dvizhka c3a72667, 3 sentjabrja 23:09)
 
 Agent shaga 3b upal po limitu sessii do zapisi v STATE.md; razdel sobran koordinatorom 4 sentjabrja
-iz soobshchenija kommita i logov D:\MemeXesults\step3b\.
+iz soobshchenija kommita i logov D:\MemeX
+esults\step3b\.
 
 Sdelano: gpu_static stroit graf NA SLOJ PO EGO RODU - 36 sloev gejted delta-seti (wqkv, gate,
 conv1d, dt, a, ba, norm, out; bez KV) i 12 sloev vnimanija (wq dvojnoj shiriny s gejtom, chastichnyj
@@ -6344,8 +6345,11 @@ vse tri vne BAR; zagruzka na kartu 1642 ms.
 
 Sverka (prompt_micro, 32 tokena, --decode-check 16, po soobshcheniju kommita):
     vse 48 sloev na karte:            15 iz 16 tokenov etalona, hudshij L2 8,35%
-    processornyj put togo zhe binarnika: 11 iz 16, hudshij L2 16,49%   <-- RASHODITSJA s 15/16 i 9,11%
-                                                                            u dbg-layout; PEREPROVERJAETSJA
+    processornyj put togo zhe binarnika: 11 iz 16, hudshij L2 16,49%   <-- v kommite; PEREPROVERENO 4.09 14:40
+                                                                            na binarnike 23:09 (verify3b_*.log):
+    CPU-put:   15 iz 16, hudshij L2 9,1129% (shag 4) - sovpadaet s dbg-layout do znaka
+    KARTA:     15 iz 16, hudshij L2 8,3478% (shag 4) - te zhe tokeny, L2 chut LUCHSHE CPU
+    (11/16 v soobshchenii kommita - skoree vsego progon do posadki etalona na CPU ili drugaja sborka)
     odin sloj delta-seti na karte:    tokeny = processornyj put; odin sloj vnimanija: 6 shagov podrjad
     --gpu-static-verify:              696 slotov na 48 slojah pobajtno
 
