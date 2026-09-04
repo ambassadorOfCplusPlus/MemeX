@@ -6383,3 +6383,20 @@ Sledstvie: shag 4 (hranilishche s C ot svobodnoj pamjati, ~360-400/512, hvost s 
 a uslovie raboty; ocenka po simuljacii pri C~380: 3-6 sinhronnyh promahov/token vmesto ~60.
 Ogovorka: vo vremja zamera dva svezhih agenta mogli chitat kod/dokumentaciju (bez sborok - zamok byl
 u zamera), CPU-vlijanie neznachitelno, no ne nulevoe.
+
+
+## KOORDINATOR, 4 sentjabrja 15:00: popravki R1 eksportirovany; q8_0-marshrutizator menjaet 3,9 vybora na token
+
+bench/train_r1.py -> D:\MemeXesults1_corr_k4.bin i r1_corr_k1.bin (po 25 214 992 bajt = 16 +
+48*513*512*2, f16; zagolovok int32[4] = n_layer, n_in=513, n_out=512, k; dlja tgt < k - tozhdestvo).
+Kontrol na vtoroj polovine posle okruglenija v f16 (sovpadaet s hidden_lab do sotyh):
+    k=4: B=10 76,68% (hudsh. sloj 69,27), B=16 90,16% (83,75), B=32 97,75% (94,60)
+    k=1: B=10 85,41% (77,09),             B=16 96,79% (90,33), B=32 99,65% (97,20)
+Obucheno na ODNOM dokumente - perenos ne izmeren; boevoj fajl obuchat na neskolkih dampah.
+
+bench/router_q8_check.py (q8_0 smodelirovan blokami po 32, kak v ggml): sovpadenie top-10 f32 protiv
+q8_0 - srednee 99,19%, hudshij sloj 45: 98,77%; eto 3,9 izmenjonnyh vybora eksperta na token iz 480,
+maks. otnositelnaja raznica vesa posle softmax 1,3%. Ekonomija na karte pri 67 GB/s ~2,9 ms/token.
+VYVOD: ne besplatno - menjaet marshrutizaciju na kazhdom tokene; NE DELAT bez zamera kachestva
+(perpleksija) i ne radi 2,9 ms. Variant f16-marshrutizatora (vdvoe menshe bajt, oshibka ~1e-3
+otnositelno) ne proverjalsja - esli ponadobitsja, snachala tem zhe skriptom.
