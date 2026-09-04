@@ -6738,3 +6738,25 @@ imeet smysl TOLKO posle etoj pravki - inache ego s'edaet trjoshing. Eto sledujus
 
 CHISLO, kotoroe stoit pomnit: mmap v ustanovivshemsja = 125 ms/token (7,6-8,0 tok/s) - eto porog,
 kotoryj hranilishche dolzhno pobit, a ne 254 ms iz cheredujushchegosja A/B.
+
+
+## KOORDINATOR, 4 sentjabrja 17:15: NEJROSET (MLP) HUZHE R1 na odnom dokumente - Kaggle bez bolshego datasetta bespolezen
+
+bench/mlp_predict.py: MLP x_l(2048)->tanh(128)->logity l+4(512), Adam, obuchenie na pervoj polovine,
+proverka na vtoroj (tot zhe split, chto R1). Na 4 slojah, k=4:
+    sloj   R1 (B=10/16/32)      MLP                 raznica
+    4      87,6/96,9/99,2       58,7/66,9/82,3      -29/-30/-17
+    15     78,2/92,7/99,0       28,8/41,1/61,9      -49/-52/-37
+    srednee B=10: R1 79,96%  MLP 42,78%  raznica -37,18
+MLP PEREOBUCHAETSJA: 2048->128->512 = na porjadok bolshe jomkosti, chem 950 obuchajushchih tokenov.
+R1 (linejnaja popravka poverh marshrutizatora - silnyj prior) obobshchaetsja luchshe. Tot zhe urok,
+chto s polnorangovym R2. VYVOD: na ODNOM dokumente bolshe moshchnosti VREDIT; Kaggle-GPU pod bolshij
+predskazatel bespolezen, poka net bolshego i luchshe raspredeljonnogo datasetta.
+
+CHTO REALNO DAST Kaggle (ispravlenie moej oshibki "80B ne vlezaet"): noutbuk daot ~30 GB RAM, IQ3_XXS
+26,5 GB VLEZAET dlja CPU-inferensa; chastichnaja vygruzka sloev na T4 GPU (-ngl N, ideja polzovatelja)
+uskorjaet. Cennost Kaggle - ne bolshaja set, a SBOR DATASETTA NA SOBSTVENNOM PRODOLZHENII MODELI
+(pravilo 87: nashi sledy na nashem promte, a nado na tom, chto model sama generiruet) na raznyh
+promtah, potom obuchenie R1/skromnoj seti na njom, veса nazad kak r1_corr.bin. Model kachaetsja v
+noutbuke s HF, s lokalnoj mashiny gruzit ne nado.
+NE IZMERENO: MLP s silnoj reguljarizaciej/dropout; bolshij hidden/menshij; perenos na drugoj tekst.
