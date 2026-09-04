@@ -6662,3 +6662,33 @@ i imenno oni rychag; matvektor v etom spiske uzhe optimalen.
   na dva chuzhih slagaemyh.
 - Pochemu q8_0 na formah attn_qkv i gate dajot 121 GB/s, a na ssm_out 129 - ne razobrano.
 - Pochemu q4_0 na 8 % nizhe ostalnyh (117,9) - ne razobrano; v statike Coder Next q4_0 net.
+
+
+## SHAG 4: REZIDENTNOE HRANILISHCHE EKSPERTOV (ExpertStore) - SVERENO (kommit dvizhka 5724cda8, 4 sentjabrja)
+
+Koordinator svjol iz logov D:\MemeXesults\step4\ poka agent dopisyval otchjot (upal po seti,
+podnjat). ExpertStore: na sloj C rezidentnyh + zapasnye sloty, tri tenzora ekspertov v PRIVATNOJ
+pamjati v porjadke slotov; id->slot na CPU do grafa; perestanovka nabora po chastote raz v 16
+tokenov; promah = sinhronnoe chtenie v zapasnoj slot (rezhim "zhdat", otvet ne menjaetsja).
+
+SVERKA (--decode-check 16, IQ3_XXS s C:, tot zhe binarnik):
+    C=256, rezhim zhdat:  tokeny TE ZHE, hudshij L2 8,3478% protiv 8,3478% bez hranilishcha - DO ZNAKA
+    ESTORE_VERIFY: 53 sloty pobajtno, 0 plohih
+    (zatravka: pervyj progon dal DRUGIE tokeny - okazalos, sravnivalos s kartochnym plechom;
+     protiv pravilnogo plecha soshlos)
+
+CHISLA C=256 (50% modeli, BEZ zatravki i progreva - namerenno hudshij sluchaj), 16 tokenov:
+    popadanij 95,73%, sinhronnyh promahov 20,5 na token = 84,9 ms na token chtenij
+    pervichnaja zalivka 12288 kopij (12,28 GiB) za 31,3 s; perestanovka nabora 334 kopii (0,33 GiB), 1373 ms
+    rabochij nabor processa 19,72 -> 21,45 GiB (pik 27,33), promahov stranic za fazu 623188
+    dolja: 516,8 ms/token vsego, iz nih 84,9 sinhronnye chtenija (16,4%)
+
+C=410 (80%) TREBUET 20,44 GiB privatnoj pri svobodnyh 20,28 - NE VLEZAET s zapasom; nuzhna
+zatravka (pervichnaja zalivka bez nejo = holodnyj kesh) i/ili C poменьше. Eto rovno arifmetika
+"eksperty 24,6 GiB ne vlezajut v OZU": privatnoe hranilishche + mmap-fajl konkurirujut za pamjat,
+poka mmap-stranicы ne vytesneny. Sledujushchee: (1) zatravka chastot iz expert_prior_coder_next.bin
+(uzhe sozdan, 98320 bajt) chtoby pervichnaja zalivka brala GORJACHIE eksperty; (2) zamer --gen 64
+A/B "mmap kak sejchas" protiv "hranilishche C=avto" (idjot); (3) predzagruzka R1 (shag 5).
+
+NE IZMERENO poka: A/B skorosti (--gen 64) - progon shjol pri padenii agenta; skolko kopij prishlo
+s diska protiv page cache; repak R4 (ne prosili v etom progone); IQ4_XS.
