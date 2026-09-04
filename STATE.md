@@ -6827,3 +6827,21 @@ to zhe po smyslu); gde ostalis 544 promaha stranic/token (ne ekspertnyj mmap - e
 aktivacii, GPU-staging, io-bufer); perevod prefilla na prjamoe chtenie (ne ponadobilos - ne
 trjoshit); IQ4_XS. llama-memex-static ne sobiralsja - eto otdelnyj primer (examples/memex-static),
 celi net v tekushchem reshenii cmake, k pravke memex-fwd otnoshenija ne imeet.
+
+
+## KAGGLE: KOD GOTOV, NO 2 BLOKERA UROVNJA AKKAUNTA (zhdut polzovatelja, 4 sentjabrja 17:35)
+
+Kaggle-agent napisal i zalil noutbuk `kaggle.com/code/ratmirgfxc/memex-dataset-r1` (klon foreka
+vetka memex, cmake -DGGML_CUDA=ON s CPU-folbэkom, skachka IQ3_XXS v /kaggle/tmp, snjatie
+MEMEX_HIDDEN_TRACE+MEMEX_EXPERT_TRACE na 6 promtah, obuchenie R1 na vseh, r1_corr_multi.bin + tablica
+perenosa mezhdu tekstami). Vsjo v `kaggle/` zakommicheno. Fork zapushen (vetka memex).
+
+DVA BLOKERA, tolko polzovatel:
+1. Akkaunt ratmirgfxc NE verificirovan po telefonu => Kaggle NE dajot GPU (smouk dal torch cpu-only,
+   cuda False) i NE dajot internet v kernele (curl k HF = kod 000). Bez etogo noutbuk ne soberjot
+   fork i ne skachaet model. Verifikacija po telefonu vkljuchaet oba.
+2. Fork memex-engine PRIVATNYJ: anonimnyj clone otkazan. Nado libo sdelat repo publichnym, libo
+   dobavit v Kaggle sekret GITHUB_PAT (read). Eto reshenie polzovatelja (publikacija koda) - koordinator
+   sam ne otkryval.
+Posle snjatija oboih: kaggle kernels push -p kaggle/ i rerun, agent privezjot r1_corr_multi.bin.
+Poka: dataset 0 tokenov. Model na Kaggle vlezaet v /kaggle/tmp (28,5 GB), no ne v /kaggle/working (21).
