@@ -6692,3 +6692,24 @@ A/B "mmap kak sejchas" protiv "hranilishche C=avto" (idjot); (3) predzagruzka R1
 
 NE IZMERENO poka: A/B skorosti (--gen 64) - progon shjol pri padenii agenta; skolko kopij prishlo
 s diska protiv page cache; repak R4 (ne prosili v etom progone); IQ4_XS.
+
+
+## SHAG q6_K ZAKRYT: JADRO NA POTOLKE VRAM; RYCHAG - PERESECHENIJA, NE SHEJDER (kommit 9941d7e4, 09343cb)
+
+Matvektor pri dekode (ne[1]=1) na formah statiki: q6_K 128,5-129,5 GB/s = polnyj potolok VRAM,
+tochno kak q8_0 (128-130), q4_K (127-129), f16 (129-130). Dekvantizacija ne stoit nichego.
+Dokazatelstvo potolka: te zhe formy, no ves <16 MiB (Infinity Cache, iz VRAM ne chitaetsja) -
+273-291 GB/s, zapas jadra 2,3x. "67 GB/s" iz shaga 3b byli golova S peresecheniem, a ne jadro;
+i pri ne[1]>=4 put obvalivaetsja (62 pri n=4) - no u nas dekod n=1. RAZGONJAT JADRO NECHEGO.
+
+RYCHAG IZMEREN (svip 1/12/24/48 sloev na karte, MEMEX_CARD_LO/HI): ustrojstvo na peresechenie
+0,830 / 0,881 / 0,871 / 0,891 / 1,042 ms - FIKSIROVANO na sloj, s chislom sloev ne rastjot.
+Uchjot 0,830 ms: bajty 0,271 + zapusk 30 dispatchej 0,216 + jadra delta-seti 0,053 + KRUG
+submit/fence 0,310. Na token: 14,9 ms krugi + 10,4 dispatchi + 13,0 bajty = DVE TRETI vremeni
+karty NE vychislenie. Lechitsja MENSHIM CHISLOM PERESECHENIJ (odin submit na neskolko sloev) i
+MENSHIM CHISLOM UZLOV (slijanie QKV) - eto otdelnyj shag, ne shejder. Ozhidanie: ubrat ~15-25 ms
+iz 43 ms karty na token.
+
+BLOKER DLJA IQ4_XS: test-backend-ops -o MUL_MAT dal 6 otkazov (fil'tr v dereve ne gonjali),
+sredi nih iq4_xs NMSE 0,0888 - statika IQ4_XS-modeli v Q8_0, no EKSPERTY IQ4_XS, a esli kogda-to
+klast down_exps na kartu - eto porog. Pochinit dekvantizaciju iq4_xs na Vulkan do IQ4_XS na karte.
