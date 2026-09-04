@@ -7055,3 +7055,30 @@ prevyshajut polosu SSD. Chtoby platil: (a) r1_corr, obuchennyj na shirokom korpu
 prodolzhenii modeli (blokiruet Kaggle - pravilo 87), (b) B blizhe k top-k, (c) IQ4_XS (80%
 rezidentno, po planu tam promahi ~0,1/token i predskazatel pochti ne nuzhen). NE PROVERENO: perenos
 R1 na tekst, na kotorom on obuchalsja (togo dampa net pod rukoj); IQ4_XS; B=10; svip k/period.
+
+
+## SHAG 5 ZAKRYT: PREDZAGRUZCHIK R1 RABOTAET, NO NUZHEN SHIROKIJ KORPUS (kommit dvizhka fab25e41, 5 sentjabrja)
+
+Flagi --expert-prefetch <r1_corr_kK.bin> --prefetch-budget B --prefetch-sync. Predskazanie: uzel
+router_{l+K}*x_l + popravka Wc[513x512] v map_custom1, top-B, chtenie NErezidentnyh v zapasnye sloty
+otdelnym I/O-potokom (async) poka graf schitaet sledujushchie K sloev. Zapasnye sloty podnjaty do
+top-k+B (inache pick_victim vernul by -1 i izmenil otvet).
+
+SVERKA: --decode-check 16 s predzagruzkoj i bez (C=128/320, ±zatravka, async i sync) - TE ZHE tokeny
+i L2 8,3478% do znaka. Predzagruzka ne menjaet otvet (dokazano).
+
+HOLODNYJ START (--gen 48 podrjad, malyj C):
+    C=320+zatravka: store 141 ms/tok (7,2 sinhr promaha), pref-async 164 ms (4,9 sinhr)
+    async luchshe sync vsegda (I/O-potok realno perekryvaet schjot, async_wait 0,4/tok)
+NO SKOROST PADAET: predzagruzka vydajot 27-161 chtenij/token pri 1,3-21 ispolzovannyh. Prichina:
+r1_corr_k4 obuchen na ODNOM chuzhom dokumente, perenos slab (iz 27 chtenij v promah popadaet 1,33);
+B=16 > top-k=10 pereizbytochen; SSD ogranichen POLOSOJ, lishnie chtenija ejo s'edajut. Mehanizm veren,
+no na IQ3_XXS s odnodokumentnym r1_corr ne uskorjaet.
+
+ZAPLATIT PRI: (a) r1_corr na SHIROKOM korpuse (bench/collect_dataset.ps1 + r1_transfer.py, zapushcheno
+lokalno vmesto Kaggle), (b) B blizhe k top-k, (c) IQ4_XS. Petlja: sobrat dampy na 7 raznyh tekstah ->
+obuchit r1_corr na N-1 -> proverit perenos i pereizmerit predzagruzku.
+
+=== VSE 5 SHAGOV PLANA ZAKRYTY. Coder Next IQ3_XXS: 118 ms/token (8,5 tok/s) tochno, 94 s repakom.
+Ot starta 164-337 ms svjornuto vdvoe. Dalshe: shirokij r1_corr (petlja vyshe), refaktoring v libmemex,
+llama-server integracija (docs/server_integration_map.md).
