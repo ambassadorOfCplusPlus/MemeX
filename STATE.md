@@ -6989,3 +6989,69 @@ docs/server_integration_map.md.
 - **V ochered (posle shaga 5, ne delal - chuzhie fajly):** vynos gpu_static/expert_store/resident_set v
   libmemex; tipizirovannyj memex_hooks v llm_build_context s probrosom v build_output/llm_build_moe_ffn/
   bilder sloja; perenos pooktokennoj orkestracii (set_step/upload_kv/observe/end_token) v update_slots.
+
+
+## SHAG 5: PREDZAGRUZKA EKSPERTOV PO R1 v dvizhke - MEHANIZM VEREN, NO NA IQ3_XXS SKOROST NE RASTJOT (examples/memex-fwd/*, 4 sentjabrja)
+
+SDELANO (expert_store.cpp/.hpp, memex-fwd.cpp; sborka build_safe, llama-memex-fwd projden;
+llama-memex-static v reshenii cmake net - otdelnyj primer, kak i ranshe):
+- Flagi: `--expert-prefetch <r1_corr_kK.bin>` (K iz zagolovka int32[4]={n_layer,513,512,K}),
+  `--prefetch-budget B` (16 po umolchaniju), `--prefetch-sync` (A/B). Trebuet `--expert-store`;
+  net fajla ili nesovpadenie form (n_layer/n_expert/n_in=n_expert+1) - OTKAZ VSLUH.
+- Predskazanie: posle x_l sloja l (vhod marshrutizatora = card_x s karty ili normed na CPU)
+  stroitsja uzel `router_{l+K}*x_l` (ggml_mul_mat na CPU, poparallelen) -> syrye logity R0
+  [n_expert]; dalshe vnutri ggml_map_custom1 na hoste primenjaetsja popravka Wc[513x512]
+  (score = [R0;1]*Wc, f16->f32) i berjotsja top-B. Uzel po zavisimosti ot x_l ljozhet na mesto
+  sloja l, tak chto chtenie idjot na fone K sloev scheta. Popravki grузjatsja v OZU odin raz.
+- Predzagruzka: nerezidentnye iz top-B stavjatsja v ZAPASNYE sloty hranilishcha tem zhe prjamym
+  chteniem (NO_BUFFERING), chto i sinhronnyj promah. ASYNC (po umolchaniju): otdelnyj I/O-potok
+  so vtorym fajlovym hendlom i buferom chitaet, poka graf schitaet sledujushchie sloi; v tochke
+  ispolzovanija (do_map sloja l+K) esli chtenie ne uspelo - zhdjom (async-promah). SYNC
+  (`--prefetch-sync`): chtenie pryamo v uzle, potok grafa stoit - dlja chestnogo A/B "prjachet li
+  I/O-potok chtenie". Mezhdu tokenami - drenazh ocheredi (bez nego pick_victim sledujushchego
+  tokena mog by vzjat slot, v kotoryj potok eshchjo pishet).
+- Zapasnye sloty avtomaticheski podnjaty do top-k + B (bylo 16 -> 26): inache na hudshem tokene
+  pick_victim vernul by -1 (predzagruzhennye zakrepleny na token) i mesto obnulilos by - eto
+  IZMENILO BY OTVET. Otchjot za token: predskazano/predzagruzheno/ispolzovano/vpustuju, sinhr.
+  promahov, async-ozhidanij, ms; stroka PREFETCH_AB dlja skriptov. Fajly: bench/step5_prefetch.ps1.
+
+SVERKA (--decode-check 16, IQ3_XXS s C:, -t 8 --no-repack --gpu-static --gpu-static-layers,
+LLAMA_MMAP_PREFETCH=0, C=128 i C=320, +-zatravka expert_prior_coder_next.bin, async I SYNC):
+    VO VSEH SLUCHAJAH tokeny TE ZHE i hudshij L2 8,3478% DO ZNAKA protiv hranilishcha bez
+    predzagruzki; ESTORE_VERIFY 0 plohih. Predzagruzka NE menjaet otvet - dokazano.
+    (Bez flagov predzagruzki graf qwen35 bajt-v-bajt prezhnij: plain-put --decode-check dal
+     15/16, L2 9,112878% - sovpadaet s zapisannym v shag 3b/4. Regress golden byl PUST - eto
+     nezakrytyj punkt plana; zapisan `-Record` na etom binarnike, mx1 16/16, gemma4 16,
+     qwen3next 16; posledujushchij progon regressii proshjol.)
+
+HOLODNYJ START (--gen 48 PODRJAD, prompt_micro 32 tokena, te zhe flagi; malyj C -> promahov mnogo):
+    C    zatravka   store ms/tok  pref(async) ms/tok  store sinhr/tok  pref sinhr/tok  popadanij   issued/tok  used/tok  vpustuju/tok  async_wait/tok
+    128  net        341,9         743,5               55,4             33,2            88,5->93,1%  161         21,1      140           45,4 (703 ms)
+    320  net        ~205          ~246                22,7             12,0            95,3->97,5%  47,3        6,9       40,3          3,1 (33 ms)
+    320  prior      141,1         163,8               7,17             4,90            98,5->99,0%  27,1        1,33      25,7          0,40 (10 ms)
+    Sync-rezhim vsegda HUZHE async (naprimer C=320+prior 236 ms/tok protiv 163) - eto dokazyvaet,
+    chto I/O-potok realno perekryvaet schjot (zaderzhka pryachetsja).
+
+CHTO VIDNO (kazhdaja cifra iz zamera):
+1. MEHANIZM RABOTAET. Predzagruzka snizhaet sinhronnye promahi (55->33, 22,7->12, 7,17->4,9) i
+   podnimaet popadanija; zaderzhku chtenija pryachet (async_wait 0,4/tok pri C=320+prior, ms_wait
+   10 protiv 25 ms wasted). Otvet ne menjaetsja.
+2. NO SKOROST PADAET VEZDE. Predzagruzka vydajot 27-161 chtenij/token, a v realnyj promah popadaet
+   1,3-21 (used). Vpustuju 25-140/token. SSD ogranichen POLOSOJ (~2,7 ms/ekspert, ne rastjot s
+   glubinoj ocheredi - io_miss_cost.py), i lishnie chtenija ejo s'edajut; ih spryatat NECHEM - eto
+   ne zaderzhka, a propusknaja sposobnost.
+3. DVE PRICHINY maloj polzy: (a) r1_corr_k4.bin obuchen na ODNOM DRUGOM dokumente, perenos na
+   prompt_micro slab - iz 27 chtenij tolko 1,33 popadajut v promah (used/issued pri C=320+prior);
+   ostatochnye promahi eto "pervye pojavlenija"/hvost (STATE: 1,4% obrashchenij k nevstrechavshimsja
+   ekspertam), kotorye ni chastota, ni predskazatel na chuzhom tekste ne dostajut; (b) B=16 > top-k
+   (=10) strukturno peredskazyvaet.
+4. SIMULJACIJA (system_sim.py) obeshchala pri C=410+zatravka 6 chtenij/token i padenie holoda v 7
+   raz; v dvizhke na C=320+zatravke - 27 chtenij i padenie sinhr.promahov v 1,5 raza. Razryv imenno
+   v perenose R1 (sim obuchal I proverjal na polovinah ODNOGO teksta) i v nepredskazuemosti hvosta.
+
+VYVOD: predzagruzchik po R1 realizovan, verificirovan (otvet ne menjaetsja) i pryachet zaderzhku
+chtenija, no na IQ3_XXS s tekushchim odnodokumentnym r1_corr NE uskorjaet - lishnie chtenija
+prevyshajut polosu SSD. Chtoby platil: (a) r1_corr, obuchennyj na shirokom korpuse / sobstvennom
+prodolzhenii modeli (blokiruet Kaggle - pravilo 87), (b) B blizhe k top-k, (c) IQ4_XS (80%
+rezidentno, po planu tam promahi ~0,1/token i predskazatel pochti ne nuzhen). NE PROVERENO: perenos
+R1 na tekst, na kotorom on obuchalsja (togo dampa net pod rukoj); IQ4_XS; B=10; svip k/period.
