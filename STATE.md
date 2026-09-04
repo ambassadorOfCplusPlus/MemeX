@@ -7255,3 +7255,24 @@ SSD, VSE 8,75 promaha -> SSD po 2,7 ms = 23,6 ms/token sync vmesto 258-367. Ocen
 Postrojka tjoplogo urovnja (kopija 3 GiB na SSD) zanjala 480 s (plecho B) - odnorazovo pri starte.
 Sverka tokenov: mehanizm ne menjaet otvet (ekspert tot zhe, chitaetsja s drugogo urovnja) - proverjaetsja
 regressiej posle sborki universalizacii.
+
+
+## SHAG 2 NOCHNOGO PLANA: UNIVERSALIZACIJA - DVIZHOK ZAMERJAET ZHELEZO SAM (kommit dvizhka fe47a3bf, 5 sentjabrja 02:25)
+
+Novyj modul hw_caps.hpp/.cpp v memex_core: pri starte zamerjaet i pechataet [izmereno/ocenka]:
+- OZU 31,9 GiB / svobodno 27,8 (GlobalMemoryStatusEx) [izmereno]
+- polosa OZU 13,3 GB/s (memcpy 128 MiB odnopotochno) [izmereno, sovetnicheski, v reshenijah ne uchastvuet]
+- VRAM 3824 MiB (Vulkan vkGetPhysicalDeviceMemoryProperties, NE po vrushchemu "free" drajvera) [izmereno]
+- BAR 256 MiB (Vulkan, samaja malaja device-local+host-visible kucha; flag rebar esli bar==vram) [izmereno]
+- disk C: SSD, D: HDD (DeviceIoControl StorageDeviceSeekPenaltyProperty; polosa - ocenka po tipu) [tip izmeren]
+
+choose_strategy(caps, geometry) pechataet vybor s obosnovaniem: golova/statika v VRAM minus rabochij zapas;
+C rezidentnyh ot svobodnoj OZU (toj zhe formuloj auto_capacity, chto hranilishche); nuzhny li urovni (eksperty
+> OZU); otkaz vsluh esli ne vlezaet. Javnyj flag pereopredeljaet avto. Vshitye 256/3824 -> hw_bar_bytes()/
+hw_vram_bytes() v gpu_static.cpp i gpu_experts.cpp.
+
+VAZHNO: na ETOJ mashine avto-vybor dajot ROVNO prezhnij hardkod (BAR 256, VRAM 3824, C tot zhe), tokeny
+16/16 na trjoh modeljah (regress_tokens.ps1) - povedenie ne izmenilos, no teper na drugoj karte/mashine
+cifry vozmutsja iz zamera, a ne iz zashitogo "mojo ustrojstvo". Ostajotsja ocenkoj: polosa diskov (tip
+izmeren, polosa konservativno po tipu). Sleduet: strategija dolzhna sama vybirat warm-cap ot svobodnogo
+SSD i gasit HDD-predzagruzku (urok IQ4_XS).
