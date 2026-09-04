@@ -49,7 +49,9 @@ function Get-Tokens([hashtable]$m) {
 if (-not (Take-Machine -Who 'regress' -TimeoutMin $TimeoutMin)) { Write-Output 'NE POLUCHIL MASHINU'; exit 3 }
 $fail = 0
 try {
-    $golden = @{}
+    # NE $golden = @{}: hesh-tablica lomaet posledujushchij dinamicheskij dostup $golden.($m.name)
+    # posle pereprisvaivanija na PSCustomObject; chitaem srazu v $null-perem.
+    $golden = $null
     if ((Test-Path $Golden) -and -not $Record) { $golden = Get-Content -LiteralPath $Golden -Raw | ConvertFrom-Json }
     $result = @{}
     foreach ($m in $MODELS) {
@@ -61,7 +63,8 @@ try {
         if ($Record) {
             Write-Output ("  zapisano {0}: {1} tokenov" -f $m.name, $r.ids.Count)
         } else {
-            $exp = $golden.($m.name)
+            $prop = if ($golden) { $golden.PSObject.Properties[$m.name] } else { $null }
+            $exp = if ($prop) { $prop.Value } else { $null }
             if (-not $exp) { Write-Output ("  NET ETALONA dlja {0} - zapusti s -Record" -f $m.name); $fail++; continue }
             $diff = @(); for ($i = 0; $i -lt [Math]::Min($exp.Count, $r.ids.Count); $i++) { if ($exp[$i] -ne $r.ids[$i]) { $diff += $i } }
             if ($diff.Count -eq 0 -and $exp.Count -eq $r.ids.Count) {
