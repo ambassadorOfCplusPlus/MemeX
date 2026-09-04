@@ -20,7 +20,7 @@
 - Аккаунт верифицирован по телефону: без этого Kaggle не даёт ни GPU (T4), ни интернет.
 - Accelerator: GPU T4 x2; Internet: On.
 - Приватный форк: сделать публичным ЛИБО добавить секрет `GITHUB_PAT`
-  (Add-ons -> Secrets) с токеном на чтение `ambassadorOfCplusPlus/memex-engine`.
+  (Add-ons -> Secrets) с токеном на чтение `ambassadorOfCplusPlus/memex-engine-public`.
 
 ## Проверенное окружение (2026-09-04, аккаунт ratmirgfxc)
 - Kaggle API/kernels — доступ есть.
