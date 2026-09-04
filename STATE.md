@@ -7174,3 +7174,56 @@ ekonomii. Predzagruzchik nuzhen imenno tam, ne na IQ3_XXS v OZU. Svip B->10 (bli
 
 ITOG PO PREDSKAZATELJU: mehanizm veren, obobshchaetsja (perenos 86%), sinhr.promahi rezhet vtroe,
 async objazatelen. Cennost - IQ4_XS i lyuboj HDD-uroven, gde promah dorog. r1_corr_multi.bin - boevoj.
+
+
+## REFAKTORING SHAG 1: VYNESENY ggml_util I sampler V memex_core (fork commit 55e49488, 5 sentjabrja)
+
+Shag 1 plana (docs/refactor_plan.md): iz anonimnogo namespace memex-fwd.cpp vyneseny dva
+samodostatochnyh bloka - E (ggml_util) i P/S (sampler) - v biblioteku memex_core. Kod
+peremeshchjon bajt-v-bajt, povedenie ne tronuto; pomenjalas tolko linkovka (internal ->
+external v namespace memex).
+
+CHTO VYNESENO:
+- ggml_util.hpp/.cpp (blok E, zavisit tolko ot ggml): norm, fnorm, report_first_nonfinite.
+- sampler.hpp/.cpp (bloki P/S): Sampling, Sampler (inline v .hpp), top2_gap, argmax_of,
+  LogitCmp, compare_logits. Tip llama_token zapisan svoim bazovym int32_t (llama_token eto
+  `typedef int32_t` - tot zhe tip, ta zhe shirina, te zhe znachenija), chtoby memex_core
+  ne tjanul llama i ostalsja zavisimym tolko ot ggml, kak i posle shaga 0.
+- memex-fwd.cpp vkljuchaet oba zagolovka na GLOBALNOM urovne (do anon namespace) s
+  `using memex::...;` dlja norm/fnorm/report_first_nonfinite/Sampling/Sampler/top2_gap/
+  argmax_of/LogitCmp/compare_logits. Eto nuzhno potomu, chto main() zhivjot ZA predelami
+  anon namespace (on zakryvaetsja na str.197 novogo fajla), a compare_logits/Sampler i pr.
+  zovutsja i tam, i vnutri anon namespace - globalnyj using pokryvaet oba. Lokalnye lambdy
+  argmax_of/top2_gap v main prosto zatenjajut globalnye v svojom bloke, kak i ranshe.
+- CMake: MEMEX_CORE_SRC += ggml_util.cpp sampler.cpp (bezuslovno, ggml-only, bez Vulkan).
+- Iz memex-fwd.cpp ushlo ~355 strok (10549 -> 10194).
+
+CHTO OSTAVLENO NA MESTE I POCHEMU (otmecheno, ne vykovyrivalos siloj):
+- head_matmul: gejt exe-only MEMEX_FWD_GPU_EXPERTS (v biblioteke ne opredeljon; perenos
+  vyrezal by vetku gstat->head i izmenil by povedenie gpu-static). Ostavlen v memex-fwd.cpp.
+- need: zovjot llama_get_model_tensor (realnyj simvol llama) - perenos zastavil by memex_core
+  linkovat llama. Krome togo eto helper zagruzchikov collect_* (blok G), kotorye idut shagom 2.
+- pad32: blok D (chtenie GGUF), idjot vmeste s hparams shagom 2.
+- softcap: OTDELNOJ chistoj funkcii net. Softcap eto graf-op ggml_softcap na
+  HParams.f_logit_softcap v postroitele gemma4 (build_gemma4_step) - zavisit ot HParams i
+  ot grafa, ostavlen na meste. Vynosit nechego.
+- Obosoblennogo "chistogo ggml_util" bloka bolshe treh funkcij v E net: ostalnoe (head_matmul,
+  need) vpleteno v exe-gejt / zagruzku vesov, sm. vyshe.
+
+SVERKA (pod zamkom, build_safe -Targets llama-memex-fwd -Dir build-vk, potom regress):
+- Sborka godna: exe slinkovan s memex_core (novye simvoly memex::norm ... memex::compare_logits
+  rezolvjatsja iz biblioteki - inache byla by oshibka linkovki), --version/zapusk ok.
+- Tokeny: --decode-check 16, LLAMA_MMAP_PREFETCH=0 -t 8 --no-repack, na treh modeljah.
+  Stroka DECODE_CHECK ... ids protiv golden_decode.json: qwen3moe_mx1 16/16, gemma4 16/16
+  (agree 3/16 protiv referensa - eto izvestnoe rashozhdenie gemma4 s llama_decode, NE golden;
+  ids sovpadajut s golden bajt-v-bajt), qwen3next 16/16. Ni odin token ne izmenilsja.
+  (regress_tokens.ps1 vsjo eshchjo pechataet "NET ETALONA" - predsushchestvujushchij kvirk
+  ConvertFrom-Json, pravka na PSObject.Properties ego ne zakryla; ne moj fajl, sverjal ids
+  vruchnuju protiv golden, kak v shage 0.)
+
+NE SDELANO (dalshe po planu, shagi 2-4): hparams (C: HParams/LayerKind/LayerGeom + D:
+read_hparams/key_*/pad32) -> hparams.hpp; weights/collect (F: Weights/DenseWeights/
+Gemma4Weights/Qwen35Weights + G: collect_*/need) -> weights.hpp; graph/cache/deltanet
+(H+I+J) -> graph.hpp/cache.hpp; reestr + builders (M: ArchModel/BuildOpts/build_any +
+L1-L5) -> shag 4, vysshij risk (porjadok uzlov grafa). Attention/moe-faktorizacija (shag 9) -
+opcionalno, v konce.
