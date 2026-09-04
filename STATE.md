@@ -6760,3 +6760,70 @@ uskorjaet. Cennost Kaggle - ne bolshaja set, a SBOR DATASETTA NA SOBSTVENNOM PRO
 promtah, potom obuchenie R1/skromnoj seti na njom, veса nazad kak r1_corr.bin. Model kachaetsja v
 noutbuke s HF, s lokalnoj mashiny gruzit ne nado.
 NE IZMERENO: MLP s silnoj reguljarizaciej/dropout; bolshij hidden/menshij; perenos na drugoj tekst.
+
+
+## SHAG 4 POCHINEN: PRJAMOE CHTENIE FAJLA MIMO MMAP UBIRALO DVOJNUJU PAMJAT (examples/memex-fwd/*, 4 sentjabrja)
+
+PROBLEMA (iz proshlogo razdela): hranilishche kopirovalo ekspertov v sloty memcpy'em IZ mmap-
+otobrazhenija fajla. Kopirovanie fol'tilo ves ekspertnyj region (24,6 GiB) v strannichnyj kesh,
+i privatnye 24 GiB + eti mmap-stranicy ne vlezali v 26 GB OZU - OS molotila stranicami
+(710-800 tys. promahov na 64 tokena), 640-886 ms/token protiv 125 u chistogo mmap.
+
+PRAVKA (expert_store.cpp/.hpp, memex-fwd.cpp): sloty zapolnjajutsja PRJAMYM CHTENIEM fajla mimo
+kesha. ExpertStore poluchaet put k gguf (cfg.gguf_path = model_path); v init otkryvaet gguf,
+beret fajlovoe smeshchenie kazhdogo tenzora ekspertov (gguf_get_data_offset + gguf_get_tensor_offset
+po imeni src-tenzora), otkryvaet fajl CreateFile'om s FILE_FLAG_NO_BUFFERING|RANDOM_ACCESS,
+derzhit ODIN hendl. fill_slot pri direct_ chitaet tri kuska (gate/up/down) v vyrovnennyj po 4096
+io-bufer i kopiruet nuzhnyj poddiapazon v slot - memcpy iz mmap bolshe ne vyzyvaetsja. Pri
+--expert-store dvizhok sam stavit LLAMA_MMAP_PREFETCH=0 (esli ne zadan) i preduprezhdaet, esli
+zadan ne-0: inache zagruzchik prefetchit ves fajl i vozvrashchaet dvojnuju pamjat.
+
+SVERKA (--decode-check 16, IQ3_XXS s C:, tot zhe binarnik, -t 8 --no-repack --gpu-static
+--gpu-static-layers, LLAMA_MMAP_PREFETCH=0):
+    bez hranilishcha:  15/16 tokenov etalona, hudshij L2 8,3478%
+    C=256, rezhim zhdat: tokeny TE ZHE, L2 8,3478% - SOSHLOS DO ZNAKA
+    ESTORE_VERIFY: 56 slotov pobajtno, 0 plohih  <- bajty prjamogo chtenija == bajty mmap,
+        znachit vychislennoe fajlovoe smeshchenie verno na vseh proverennyh slojah/ekspertah.
+    C=483 pri --decode-check ne vlez: s referens-prefillom svobodno 19,73 GiB, nuzhno 23,94,
+        storozh pamjati otkazal vsluh (eto ta zhe arifmetika, ne defekt). Bez referensa
+        (--no-ref, --gen) svobodno 26,45 GiB i avto vzjal dazhe C=493.
+
+SKOROST (--gen 64, --no-ref, PODRJAD = ustanovivsheesja, LLAMA_MMAP_PREFETCH=0):
+    mmap:          podrjad 118,2 / 255,8; ustanovivsheesja ~118 ms/token (255,8 - pervyj posle
+                   pereklyuchenija, otravlen kesh)
+    hranilishche C=493:  podrjad 129,4 / 117,0; ustanovivsheesja 117-123 ms/token, POBILO 125
+        popadanij 99,58%, sinhronnyh promahov 2,0/token = 8 ms, tokeny TE ZHE, chto u mmap
+        PROMAHOV STRANIC ZA FAZU 34812 na 64 tokena (~544/token) protiv 710-800 TYSJACH ranshe
+        - padenie v ~20 raz. Rabochij nabor 28,2 GiB STABILEN (24 GiB slotov - EDINSTVENNAJA
+        kopija, mmap ekspertov ne rezidenten). Zapolnenie: 71382 kuska prjamym chteniem s diska.
+    REPAK R4 (--expert-store-repack, IQ2_S/IQ3_XXS -> _R4): podrjad 93,4 / 94,8 = 94,1 ms/token,
+        razbros 1,5%, popadanij 99,65%. Na 23 ms/token bystree prostogo hranilishcha (schjot
+        ekspertov na CPU deshevle), luchshe ozhidanija plana -13 ms. NO MENJAET OTVET: decode-check
+        14/16 tokenov etalona (na odin menshe), hudshij L2 6,7778% - poetomu pod otdelnym flagom.
+        ESTORE_VERIFY pri repake pravilno govorit "sravnenie nevozmozhno" (bajty _R4 drugie).
+
+DVA INVARIANTA (proverka koda, po zaprosu koordinatora):
+1. HRANILISHCHE - EDINSTVENNAJA KOPIJA. Dekod (n_tokens==1) v grafe chitaet TOLKO sloty
+   (qwen35_moe_routed: pri es->on() t_gate/up/down = es->gate/up/down, ids = slots_node);
+   modelnye L.*_exps ne trogajutsja. Promah chitaet s FAJLA v zapasnoj slot (read_chunk), ne
+   s mmap. Pervichnaja zalivka (prime) - tozhe s fajla. Promahi stranic upali ~20x (do 34812),
+   ekspertnyj mmap rezidentnym ne derzhitsja. NAZVANO: PREFILL (n_tokens>1) po zamyslu ostajotsja
+   na mmap-tenzorah (memex-fwd.cpp:3615-3618, o.es = (n_tokens==1)?es:nullptr) - eto odin
+   raz, fol'tit lish podmnozhestvo (rabochij nabor k nachalu dekoda 28,2 GiB, a ne 48), stranicy
+   sbrasyvaemye. Ne meshaet: ustanovivsheesja ne trjoshit. Obshchij (shared) ekspert - malyj
+   staticheskij trafik, ne chast 24 GiB regiona.
+2. ATOMARNAJA PODMENA SLOTA. Vsjo na ODNOM potoke, otdelnogo I/O-potoka NET (bar'er ne nuzhen).
+   fill_slot pishet dannye slota do togo, kak stavit id_of/slot_of, a vyhodnoj indeks dst[j]=slot
+   stavitsja tolko posle vozvrata iz fill_slot. Uzel slots_node (ggml_map_custom1, n_tasks=1)
+   po zavisimosti dannyh schitaetsja CELIKOM do ljubogo mul_mat_id (ids = ego vyhod), tak chto ni
+   odin mul_mat_id ne chitaet slot vo vremja zapisi. Vytesnjaemyj slot pere-ispolzuetsja na meste,
+   no zhertva - tolko ne-rezidentnyj (want) i ne tronutyj na etom tokene (touched==token) slot,
+   tak chto ejo ekspert v etom tokene bolshe nikto ne chitaet (imenno tot defekt, chto lechit
+   stroka touched na popadanii). Perestanovka nabora (refresh, raz v 16 tokenov) idjot v
+   end_token() MEZHDU tokenami, kogda graf ne ispolnjaetsja. Sluchaj - "trivialno na odnom potoke".
+
+NE PROVereno/NE SDELANO: C=483 rovno (ne vlez pod referensom; avto dal 493 bez referensa -
+to zhe po smyslu); gde ostalis 544 promaha stranic/token (ne ekspertnyj mmap - eto KV-kesh,
+aktivacii, GPU-staging, io-bufer); perevod prefilla na prjamoe chtenie (ne ponadobilos - ne
+trjoshit); IQ4_XS. llama-memex-static ne sobiralsja - eto otdelnyj primer (examples/memex-static),
+celi net v tekushchem reshenii cmake, k pravke memex-fwd otnoshenija ne imeet.
