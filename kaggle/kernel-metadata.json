@@ -1,0 +1,10 @@
+{
+  "id": "ratmirgfxc/memex-dataset-r1",
+  "title": "memex dataset r1",
+  "code_file": "memex_dataset_kaggle.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true
+}
