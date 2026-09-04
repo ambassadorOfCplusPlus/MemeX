@@ -7276,3 +7276,60 @@ VAZHNO: na ETOJ mashine avto-vybor dajot ROVNO prezhnij hardkod (BAR 256, VRAM 3
 cifry vozmutsja iz zamera, a ne iz zashitogo "mojo ustrojstvo". Ostajotsja ocenkoj: polosa diskov (tip
 izmeren, polosa konservativno po tipu). Sleduet: strategija dolzhna sama vybirat warm-cap ot svobodnogo
 SSD i gasit HDD-predzagruzku (urok IQ4_XS).
+
+
+## SHAG 3 NOCHI: GOLOVA NA KARTE V SHTATNOM llama-server (5 sentjabrja ~02:5x)
+
+Pervoe soderzhatelnoe vstraivanie mehanizma MemeX v shtatnyj llama-server foreka (ne POC-env, a
+podmena uzla grafa). Mehanizm - GOLOVA NA KARTE (memex::GpuStatic::head), tochka (a) iz
+docs/server_integration_map.md. Foreke D:\MemeX\src\ik_llama.cpp, kommit dvizhka do pravki fe47a3bf.
+
+CHTO SDELANO (3 fajla foreka, minimalno):
+1. LINKOVKA memex_core. src/CMakeLists.txt: `if (GGML_VULKAN AND LLAMA_BUILD_EXAMPLES)
+   target_link_libraries(llama PRIVATE memex_core); target_compile_definitions(llama PRIVATE
+   MEMEX_HEAD_AVAILABLE)`. Golova zhivjot VNUTRI llama.dll (build_output), poetomu memex_core
+   linkuetsja k llama, a ne tolko k serveru. Cel memex_core opredelena v examples/memex-fwd
+   (dobavljaetsja pozzhe src) - CMake razreshaet forward-ssylku na cel. Slinkovalos bez oshibok
+   (llama.dll peresobran, memex-simvoly rezolvnulis - inache byla by oshibka linkovki).
+   examples/server/CMakeLists.txt: takzhe slinkovan memex_core s llama-server (dlja budushchih
+   mehanizmov v servernom sloe; sama golova ego ne trebuet).
+2. GOLOVA KAK OPCIJA. src/llama-build-context.cpp: namespace memex_head (zerkalo memex_cc),
+   gejt env MEMEX_GPU_HEAD=1. V build_output, nerazdeljonnaja vetka (byla stroka 2732), finalnyj
+   llm_build_lora_mm(output,cur) zamenjaetsja na gstat->head(ctx,cur) KOGDA: env vkljuchen I
+   cur->ne[1]==1 (dekod odnogo tokena). Init lenivyj na pervom dekode iz lctx.model (n_embd,
+   n_vocab, output.weight). GEJT SLOTA: pri lctx.cparams.n_seq_max>1 - OTKAZ VSLUH v stderr i
+   shtatnyj put. Prefill (ne[1]>1) i multislot idut shtatnym matmulom. Vsjo pod
+   `#if defined(GGML_USE_VULKAN) && defined(MEMEX_HEAD_AVAILABLE)` - v dereve bez Vulkan/primerov
+   golovy prosto net, put bajt-v-bajt prezhnij.
+
+SVERKA KORREKTNOSTI (pod zamkom, mx1 Qwen3-Coder-30B-A3B, -ngl 99 -ot exps=CPU -ot
+'^output\.weight$=CPU' -fa off -c 4096 -t 8 --parallel 1 --no-warmup, greedy temp=0 top_k=1
+seed=0, odin promt "Write a function that reverses a string in Python.", 48 tokenov):
+    prokhod          tok/s    tekst
+    baseline (bez)   10,14    ------ etalon
+    mehanizm (head)  11,38    IDENTICHEN baseline BAJT-V-BAJT (temp=0)
+TEXT IDENTICAL = True. Baner mehanizma v stderr:
+"MemeX GPU-head: golova na karte 'AMD Radeon RX6500 XT' (n_vocab=151936, n_embd=2048, tip q6_K)".
+
+VYVODY:
+1. memex_core SLINKOVAN s dvizhkom/serverom, golova PODKLJUCHAETSJA i SCHITAET te zhe logity:
+   greedy-tekst sovpal bajt-v-bajt s/bez mehanizma. Mehanizm vstroen VERNO.
+2. Dvojnoj Vulkan ne upal: ggml uzhe derzhit Vulkan-bekend (-ngl 99), a GpuStatic delaet SVOJ
+   ggml_backend_vk_init(0) na tom zhe device 0 - odna golova q6_K (~243 MiB) legla rjadom s 558 MiB
+   statiki, bez konflikta. Sched sam postavil map_custom2-uzel golovy na CPU-bekend (Vulkan ne
+   podderzhivaet MAP_CUSTOM), vhod x skopirovan s karty na host - shov iz karty (razdel 4) sam
+   soshjolsja, javnoj privjazki k CPU ne ponadobilos.
+3. Skorost: 10,14 vs 11,38 tok/s - raznica eto SHUM zagruzki (baseline gruzilsja holodnym, mehanizm
+   vtorym s tjoplym fajl-keshem OS). Golova stoit ~4 ms/token i na fone CPU-ekspertov (~88 ms/token)
+   ne vidna, kak i predskazyvala karta. Glavnoe - korrektnost i "mehanizm podkljuchaetsja".
+
+CHEGO POTREBOVALO OT JADRA: odna pravka logiki build_output (podmena uzla pod #if) + odna stroka
+linkovki v dvuh CMake. output.weight NADO derzhat host-dostupnym (-ot '^output\.weight$=CPU'): pri
+-ngl 99 statika idjot v Vulkan-bufer, i togda init golovy chestno otkazyvaetsja
+("output.weight nedostupen hostu") i vozvrashchaetsja na shtatnyj put - proverjaetsja is_host.
+
+NE SDELANO / DALSHE: (b) sloj na karte - trebuet perenosa set_step/upload_kv v update_slots
+i odnogo slota; (v) hranilishche ekspertov - uzel id->slot v llm_build_moe_ffn + Windows-port
+otlozhennogo puti; (g) kolcevoj KV - geometrija buferov v llama_kv_cache_init; (d) predskazatel R1
+- snjatie skrytogo sostojanija v processe + selektivnyj prefetch_experts. Golova gejtuetsja na odin
+token: dlja multislota/prefila ostajotsja shtatnyj matmul (razdel 3 karty, variant A).
