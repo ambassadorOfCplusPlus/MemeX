@@ -7227,3 +7227,31 @@ Gemma4Weights/Qwen35Weights + G: collect_*/need) -> weights.hpp; graph/cache/del
 (H+I+J) -> graph.hpp/cache.hpp; reestr + builders (M: ArchModel/BuildOpts/build_any +
 L1-L5) -> shag 4, vysshij risk (porjadok uzlov grafa). Attention/moe-faktorizacija (shag 9) -
 opcionalno, v konce.
+
+
+## SHAG 1 NOCHNOGO PLANA: IQ4_XS TRJOHUROVNEVOE HRANILISHCHE ZAMERENO (5 sentjabrja 01:5x, kommit dvizhka 443de8c6)
+
+D:\Qwen3-Coder-Next-UD-IQ4_XS.gguf (eksperty 33,4 GiB, s HDD), C=330 (64% rezidentno), --gen 64 podrjad:
+    rezhim                    tok/s   ms/token   sinhr.promahov (SSD/HDD)   bajt (SSD/HDD)
+    bez tjoplogo urovnja      2,02    495        8,75 (0 / 8,75)            0 / 0,77 GiB
+    TJOPLYJ SSD 3 GiB         2,62    381        8,75 (2,9 / 5,8)           0,25 / 0,51 GiB
+    tjoplyj + predzagruzka    1,81    552        6,11 (2,3 / 3,8)           async HDD 1470 chtenij!
+
+VYVODY:
+1. Tjoplyj SSD-uroven RABOTAET: +30% (2,02->2,62), perenjos ~3 promaha s HDD na SSD, -110 ms/token.
+   Uchjot po urovnjam tochnyj (ESTORE_LEVEL: sync_ssd_pt/sync_hdd_pt/bytes_ssd/bytes_hdd).
+2. PREDZAGRUZKA NA HDD VREDIT (2,62->1,81): zavalivaet medlennyj disk - 1470 async-chtenij s HDD za 64
+   tokena, ispolzovano ~0. HDD 23 ms/chtenie ne vyvozit potok dogadok, oni dushat realnye promahi.
+   UROK: na HDD uprezhdenie nado gasit ili rezko ogranichivat; dva poroga dolzhny eto delat zhjostche
+   (sejchas B=12 vsjo ravno vydajot 9 issued/token na HDD). Nuzhen porog "esli uroven HDD i polosa
+   HDD zanjata - ne predzagruzhat vovse".
+3. "PROMAHOV OKOLO NULJA" (cel polzovatelja) NE dostignuto: 8,75->6,11, vsjo eshchjo HDD-bound. Prichina:
+   SSD zanjat kopiej IQ3_XXS (svobodno 4 GiB), tjoplyj uroven vlez lish na 3 iz 9 GiB overflow.
+
+OCENKA PRI POLNOM SSD (esli udalit kopiju IQ3_XXS, 26,5 GB -> svobodno ~30 GB): ves overflow 9 GiB na
+SSD, VSE 8,75 promaha -> SSD po 2,7 ms = 23,6 ms/token sync vmesto 258-367. Ocenka: ~120-140 ms/token
+= 7-8 tok/s dlja IQ4_XS. Eto POL dlja 4-bitnoj na etoj mashine - reshenie polzovatelja osvobodit SSD.
+
+Postrojka tjoplogo urovnja (kopija 3 GiB na SSD) zanjala 480 s (plecho B) - odnorazovo pri starte.
+Sverka tokenov: mehanizm ne menjaet otvet (ekspert tot zhe, chitaetsja s drugogo urovnja) - proverjaetsja
+regressiej posle sborki universalizacii.
