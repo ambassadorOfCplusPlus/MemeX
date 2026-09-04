@@ -13,7 +13,7 @@ param(
     [int]    $Tokens = 32,
     [int]    $Check  = 16,
     [int]    $TimeoutMin = 240,
-    [string] $Golden = 'C:\Users\User11\Desktop\MemeX\bench\golden_tokens.json'
+    [string] $Golden = 'C:\Users\User11\Desktop\MemeX\bench\golden_decode.json'
 )
 . C:\Users\User11\Desktop\MemeX\bench\lock.ps1
 $EXE = 'D:\MemeX\src\ik_llama.cpp\build-vk\bin\Release\llama-memex-fwd.exe'
