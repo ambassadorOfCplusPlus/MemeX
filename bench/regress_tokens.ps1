@@ -38,13 +38,11 @@ function Get-Tokens([hashtable]$m) {
     # Assert-Model: zagruzchik realno otkryl to, chto prosili.
     $want = Split-Path -Leaf $m.path
     if ($txt -notmatch [regex]::Escape($want)) { return @{ err = "v loge net imeni $want" } }
-    # Stroka "nashi id: 1817 3950 ..." - eto vydannye tokeny.
-    $line = Select-String -Path $log -Pattern 'nashi id:\s*([\d ]+)' | Select-Object -Last 1
-    if (-not $line) { $line = Select-String -Path $log -Pattern 'наши id:\s*([\d ]+)' | Select-Object -Last 1 }
-    if (-not $line) { return @{ err = 'ne nashjol stroku "nashi id:" v loge' } }
+    # Mashinnaja stroka: "DECODE_CHECK agree 15 steps 16 worst_l2 9.11 worst_step 4 ids 3950 323 ..."
+    $line = Select-String -Path $log -Pattern 'DECODE_CHECK\b.*\bids\s+([\d ]+)\s*$' | Select-Object -Last 1
+    if (-not $line) { return @{ err = 'ne nashjol stroku "DECODE_CHECK ... ids" v loge' } }
     $ids = ($line.Matches[0].Groups[1].Value.Trim() -split '\s+') | ForEach-Object { [int]$_ }
-    # Skolko iz Check shagov soshlis s etalonom - dlja spravki.
-    $agree = Select-String -Path $log -Pattern 'iz (\d+) shagov dali tot zhe token|(\d+) iz \d+ shagov' | Select-Object -Last 1
+    $agree = Select-String -Path $log -Pattern 'DECODE_CHECK agree (\d+) steps (\d+)' | Select-Object -Last 1
     return @{ ids = $ids; agree = ($agree ? $agree.Line.Trim() : '') }
 }
 
