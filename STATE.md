@@ -6932,3 +6932,21 @@ ih slit - polozhit ekspertov na kartu (togda sosednie sloi v odnom submite), a e
 ("rychag - peresechenija, ne shejder") ostajotsja veren, no SAMI peresechenija na etoj granice
 karta/CPU nesnizhaemy bez perenosa ekspertov. Zamerov novyh ne delal - sborka radi <1 ms pod
 shumom 7 ms i s riskom dlja verificirovannogo puti protivorechit discipline proekta.
+
+
+## PERESECHENIJA KARTY: 48/token STRUKTURNY, ne snizhaemy poka eksperty na CPU (kommit b4f34cc, 4 sentjabrja)
+
+Agent razobral tri rychaga po potoku dannyh, NICHEGO ne sobiral (net pravki dlja "do/posle"), i eto
+rezultat, a ne otkaz:
+- RYCHAG 1 (perekrytie CPU-ekspertov sloja l s kartoj l+1) - NEVOZMOZHEN. Moja gipoteza neverna:
+  vhod karty l+1 = cur_l = attn_out + EKSPERTY_l + sh. FFN sloja l stoit DO vnimanija sloja l+1,
+  eksperty_l lezhat na puti ostatka v sloj l+1. Ni odin uzel karty l+1 ne nezavisim ot ekspertov_l.
+  Perekrytie = 0. Blok POSLEDOVATELNYJ.
+- RYCHAG 2 (menshe fence) - fence v ggml-vulkan.cpp (ne v examples/, pravit nelzja); host chitaet
+  4 velichiny srazu posle graph_compute, mul_mat_id ekspertov v tom zhe grafe. Async bez fence =
+  "musor nevosproizvodimo" (klass mask_swa), uzhe otklonjon dlja gemmy.
+- RYCHAG 3 (menshe uzlov) - 36 sloev delta-seti UZHE slity (wqkv/wqkv_gate/ssm_ba odnim mul_mat);
+  slijanie tolko 12 sloev vnimanija = 0,17 ms/token + konkatenacii = ~0,7-0,9 ms (+0,8%) POD SHUMOM 18%.
+Vyvod: 48 peresechenij/token strukturny, poka marshrutiziruemye eksperty na CPU (24,6 GiB protiv 4 GB
+VRAM). Karta ~43 ms/token ne snizhaema etim putjom. Vyvod q6_K ("rychag - peresechenija") veren po
+diagnozu, no sami peresechenija na granice karta/CPU neustranimy bez perenosa ekspertov na kartu.
