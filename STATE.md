@@ -6400,3 +6400,47 @@ maks. otnositelnaja raznica vesa posle softmax 1,3%. Ekonomija na karte pri 67 G
 VYVOD: ne besplatno - menjaet marshrutizaciju na kazhdom tokene; NE DELAT bez zamera kachestva
 (perpleksija) i ne radi 2,9 ms. Variant f16-marshrutizatora (vdvoe menshe bajt, oshibka ~1e-3
 otnositelno) ne proverjalsja - esli ponadobitsja, snachala tem zhe skriptom.
+
+
+## PREFETCH POD WINDOWS: LLAMA_MMAP_PREFETCH (4 sentjabrja 14:56) - 203 sekundy zagruzki s HDD darom
+
+DIAGNOZ PODTVERZHDJON PO KODU. src/llama-model-loader.cpp:1028 (init_mappings):
+"new llama_mmap(file.get(), prefetch ? -1 : 0, ...)" - to est (size_t) -1, i Windows-vetka
+src/llama-mmap.cpp berjot range.NumberOfBytes = min(size, prefetch) = VES FAJL i otdajot ego
+PrefetchVirtualMemory. Vykljuchit bylo nechem: --defer-experts (llama.cpp, vozle
+build_expert_tensor_index) pod ne-Linux tolko pechataet "only supported on Linux".
+
+RUChKA. src/llama-mmap.cpp, llama_win_prefetch_limit: LLAMA_MMAP_PREFETCH - ne zadana (kak bylo),
+0 (PrefetchVirtualMemory ne zovjotsja), N bajt s suffiksom K/M/G (tolko pervye N). Tolko umenshaet,
+nikogda ne vkljuchaet prefetch tam, gde zagruzchik ego ne prosil. Otkaz vsluh odnoj strokoj:
+"llama_mmap: prefetch OTKLJUCHEN (LLAMA_MMAP_PREFETCH=0)". Publichnyj API ne tronut.
+
+IQ3_XXS 26,5 GiB s C: (SSD), --tokens 32 --gen 64 -t 8 --no-repack --no-ref --gpu-static
+--gpu-static-layers, plechi cheredovalis, 2 kruga:
+                        zagruzka (do "slovar")   stena vsego   our_tok_s
+    PREFETCH=0  krug 1           0,76 s              15,5 s       7,67
+    kak bylo    krug 1          40,45 s              54,8 s       7,84
+    PREFETCH=0  krug 2           0,53 s              15,0 s       7,86
+    kak bylo    krug 2           3,89 s              18,2 s       7,94
+Zagruzka: 0,5-0,8 s protiv 3,9-40,5 s. Razbros plecha "kak bylo" v 10 raz - eto i est mera togo,
+skolko fajla lezhalo v stranichnom keshe: krug 2 shjol srazu posle progona, kotoryj te zhe stranicy
+uzhe zatronul oshibkami dostupa. Plecho PREFETCH=0 razbrosa ne imeet voobshche - ono nichego ne chitaet
+zaranee. Generacija: 7,67/7,86 protiv 7,84/7,94 - plecho "kak bylo" bystree na 1,6% pri razbrose
+3,6%, to est shtraf lenivyh oshibok dostupa zdes NE IZMERIM (na etom zhe stende razbros po krugam
+ranshe dohodil do 15%).
+
+IQ4_XS 41,5 GB s D: (HDD), --tokens 32 --gen 8 -t 8 --no-repack --no-ref, bez karty:
+    PREFETCH=0     zagruzka   0,56 s   stena 194,1 s   0,283 tok/s
+    kak bylo       zagruzka 204,12 s   stena 406,9 s   0,282 tok/s
+203,6 sekundy zagruzki ischezajut, stena padaet vdvoe (406,9 -> 194,1), gen_ms otlichaetsja na 0,3%
+(28 359 protiv 28 281 ms) - vsja raznica v zagruzke, ne v schjote.
+
+TOKENY SOVPALI: vse chetyre progona IQ3 dali odin i tot zhe spisok 64 id (1817 3950 323 49143 ...
+20276 323 1246). Oba progona HDD dali odinakovyj spisok iz vosmi nulevyh id - vyrozhdennyj vyvod
+etogo puti (IQ4_XS bez karty i bez etalona) est i do pravki, k prefetchu otnoshenija ne imeet, no
+plechi mezhdu soboj sovpadajut, a eto to, chto proverjalos.
+
+NE IZMERENO: vlijanie na dlinnuju generaciju (tysjachi tokenov) - lenivye oshibki dostupa mogut
+otygrat chast vyigrysha na hvoste, zdes 64 tokena; promezhutochnye znachenija N (naprimer 2G na
+statiku) ne merjalis - tolko 0 protiv "kak bylo"; chislo promahov stranic i rabochij nabor processa
+ne pechatajutsja; llama-cli ne proverjalsja (ruchka v llama.dll, tak chto dolzhna rabotat i tam).
