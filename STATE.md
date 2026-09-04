@@ -6845,3 +6845,90 @@ DVA BLOKERA, tolko polzovatel:
    sam ne otkryval.
 Posle snjatija oboih: kaggle kernels push -p kaggle/ i rerun, agent privezjot r1_corr_multi.bin.
 Poka: dataset 0 tokenov. Model na Kaggle vlezaet v /kaggle/tmp (28,5 GB), no ne v /kaggle/working (21).
+
+
+## PERESECHENIJA CODER NEXT: TRI RYCHAGA RAZOBRANY PO KODU I POTOKU DANNYH - VSE TRI ZABLOKIROVANY ILI POD SHUMOM (5 sentjabrja)
+
+Zadacha: snizit 14,9 ms/token kruga submit/fence (0,310 x 48) i 10,4 ms/token zapuska dispatchej
+(0,216 x 48) - dve treti iz 40,3 ms karty na token, NE vychislenie. Rychagov predlozheno tri:
+(1) perekryt CPU-ekspertov sloja l s kartoj sloja l+1; (2) ubrat fence mezhdu slojami; (3) menshe
+uzlov (slijanie QKV). Razobrany po kodu (build_qwen35_step, qwen35_moe_routed, gpu_static do_layer /
+build_next_layer / finish_layer_graph). VYVOD: ni odin ne dajot bezopasnogo polozhitelnogo vyigrysha
+na etoj arhitekture. NICHEGO NE SOBIRALOS - pravka nizhe poroga izmerimosti i s riskom dlja
+pobajtno vyverennogo puti ne opravdana. Kazhdoe chislo - iz koda libo iz uzhe izmerennogo svipa.
+
+### RYCHAG 1 (perekrytie) - NEVOZMOZHEN, dokazano potokom danych
+
+Coordinator predpolozhil: karta sloja l+1 mozhet startovat, kak tolko gotov OSTATOK sloja l,
+kotoryj karta "uzhe poschitala", a CPU-eksperty l idut parallelno. ETO NEVERNO dlja qwen3next -
+blok POSLEDOVATELNYJ, ne parallelnyj. Tochnyj potok (memex-fwd.cpp:3705-3841, qwen35_moe_routed
+3317-3366):
+
+    karta sloja l vozvrashchaet:  attn_out = vnimanie/delta + vhodnoj ostatok   (o_res, slot 0)
+                                 xf       = ffn_norm(attn_out)                   (slot 1, vhod ekspertov)
+                                 sh       = obshchij ekspert(xf), gejtovannyj    (slot 2)
+                                 rl       = logity marshrutizatora(xf)           (slot 3)
+    CPU sloja l:   routed = mul_mat_id(eksperty, xf, top_k(rl)) + attn_out
+                   cur_l  = routed + sh          <-- POLNYJ ostatok na vyhode sloja l
+    karta sloja l+1:  vhod = cur_l  (lnorm(cur_l, attn_norm) -> vnimanie/delta l+1)
+
+To est ostatok, kotoryj karta poschitala na sloe l - eto TOLKO attn_out (do ekspertov). A vhod
+karty l+1 = cur_l = attn_out + eksperty_l + sh. Eksperty_l LEZHAT NA PUTI OSTATKA v l+1: FFN sloja l
+(eksperty) stoit DO vnimanija sloja l+1, ne posle. Znachit karta l+1 ne mozhet startovat, poka
+CPU-eksperty l ne gotovy. Vsjo v sloe l+1 (vnimanie/delta, marshrutizator, obshchij ekspert) chitaet
+cur_l - net ni odnogo uzla karty l+1, nezavisimogo ot ekspertov_l. PEREKRYTIE = ROVNO NOL.
+Eto tot zhe vyvod, chto v razdele "KARTA I PROCESSOR IDUT STROGO PO OCHEREDI" (dlja gemmy),
+teper dokazannyj poimenno dlja qwen3next. Podtverzhdeno zamerom: ustanovivsheesja 118 ms/token =
+43 (karta) + ~75 (eksperty), stro go posledovatelno (razdel shag 4, kommit 5724cda8).
+
+### RYCHAG 2 (menshe fence) - ZABLOKIROVAN toj zhe zavisimostju I VNE REDAKTIRUEMOGO KODA
+
+Fence na sloj stoit v ggml_backend_graph_compute (ggml-vulkan.cpp:9674-9678, fence sobstvennogo
+poslednego submita) - a pravit razresheno TOLKO examples/memex-fwd/*. Ubrat ego mozhno lish cherez
+ggml_backend_vk_batch_submit/reap iz do_layer, sdelav submit asinhronnym. No:
+- Fence na KAZHDOM sloe na kriticheskom puti: host chitaet vse chetyre velichiny SRAZU posle
+  graph_compute (do_layer:2498-2517 memcpy v dst), i mul_mat_id ekspertov v tom zhe hostovom grafe
+  potrebljaet ih sledujushchimi uzlami. Otlozhit fence nelzja - rezultat nuzhen nemedlenno.
+- Slit submity SOSEDNIH sloev nelzja: mezhdu kazhdoj paroj karta->karta stoit CPU-shag ekspertov
+  (na ostatke, rychag 1). Chislo peresechenij strukturno 48/token, poka eksperty ne na karte
+  (24,6 GiB IQ3_XXS protiv 4 GB VRAM - zablokirovano zhelezom, sm. shag 3b).
+- Asinhronnyj submit bez fence = "musor NEVOSPROIZVODIMO" - tot klass oshibki (mask_swa), chto uzhe
+  el nochi; STATE uzhe ocenil ego dlja gemmy (+6,5%, 4,44 ms) i otklonil kak neopravdannyj risk.
+Bekend Vulkan v etom dereve NE realizuet asinhronnyj interfejs ggml (synchronize, *_async, sobytija
+= NULL, ggml-vulkan.cpp:10700-10721), tak chto perekrytie prishlos by stroit potokom - a perekryvat
+nechego (rychag 1).
+
+### RYCHAG 3 (menshe uzlov / QKV) - ISPOLNIM, no potolok ~0,7-0,9 ms/token, POD SHUMOM 18%
+
+Podschitano po build_next_layer (30 dispatchej/sloj podtverzhdeno, sovpadaet s izmerennym):
+- 36 sloev DELTA-SETI (75%): proekcii UZHE slity - odin wqkv mul_mat [n_embd -> 2*key+val=8192],
+  odin wqkv_gate, odin ssm_ba. Slivat nechego, rychag QKV zdes ne primenim.
+- 12 sloev VNIMANIJA (25%): wq (dvojnaja shirina s gejtom, cherezgolovnoe chередование), wk, wv -
+  tri mul_mat. Slijanie v odin (konkatenacija vesov po ne[1]) ekonomit 2 dispatcha x 12 = 0,17 ms/token.
+- Obshchij ekspert (vse 48 sloev): up_shexp/gate_shexp NELZJA slit v fused_up_gate - na Vulkan u
+  GGML_OP_FUSED_UP_GATE net realizacii (build_next_layer:1964-1971), uzhe minimalnaja forma iz dvuh
+  mul_mat. Konkatenacija vesov up+gate -> 1 dispatch x 48 = 0,35 ms; router+shexp_gate -> 1 x 48 = 0,35.
+
+Summa VSEH slijanij <= ~0,7-0,9 ms/token (+~0,8%). Razbros progona k progonu 18% (~7 ms na 40 ms
+karty, razdel shaga 3b) - pravka na poriadok nizhe poroga izmerimosti. I kazhdoe slijanie trebuet
+konkatenacii KVANTOVANNYH vesov v alloc_layers - to est trogaet pobajtno vyverennyj put zalivki
+(ESTORE/gpu-static-verify) radi vyigrysha pod shumom. Ne sdelano.
+
+### EDINSTVENNOE REALNOE PEREKRYTIE - OBSHCHIJ EKSPERT - to'zhe ne stoit
+
+Obshchij ekspert (n_ff_shexp=512, podtverzhdeno dbg_hidden_check.log kv30) - edinstvennaja rabota
+karty, ne gejtiruemaja CPU-ekspertami: up[2048x512]+gate[2048x512]+down[512x2048] q6_K = 2,58 MiB/sloj
+/128,5 GB/s = 0,020 ms bajty + 7 dispatchej x 7,2us = 0,050 ms + jadro ~0,01 = ~0,08 ms/sloj, ~3,8 ms/token.
+Ego mozhno bylo by schitat asinhronno, poka CPU schitaet ekspertov (oni ne zavisjat drug ot druga:
+oba berut xf). No: (a) potolok 3,8 ms < otklonjonnyh +6,5% gemmy; (b) trebuet vtorogo submita na sloj
+i togo zhe asinhronnogo puti bez fence (risk musora); (c) reap dobavljaet host-nakladnye. EV
+otricatelnyj pri tom zhe riske. Ne sdelano.
+
+### CHTO OSTAJOTSJA REALNYM RYCHAGOM
+
+48 peresechenij/token - STRUKTURNO, poka marshrutiziruemye eksperty na CPU. Edinstvennyj sposob
+ih slit - polozhit ekspertov na kartu (togda sosednie sloi v odnom submite), a eto zablokirovano
+4 GB VRAM. Menshe bajt statiki (Q6_K->menshe) i menshe uzlov - oba pod shumom. Vyvod razdela q6_K
+("rychag - peresechenija, ne shejder") ostajotsja veren, no SAMI peresechenija na etoj granice
+karta/CPU nesnizhaemy bez perenosa ekspertov. Zamerov novyh ne delal - sborka radi <1 ms pod
+shumom 7 ms i s riskom dlja verificirovannogo puti protivorechit discipline proekta.
