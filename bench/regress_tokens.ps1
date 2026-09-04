@@ -1,5 +1,5 @@
 # Regressionnyj nabor: pod zamkom gonjaet --decode-check na trjoh arhitekturah i sravnivaet
-# vydannye tokeny s etalonnym snimkom (bench/golden_tokens.json). Padaet vsluh pri drejfe.
+# vydannye tokeny s etalonnym snimkom (bench/golden_decode.json). Padaet vsluh pri drejfe.
 # Eto zapolnjaet probel "net testov kotorye gonjajutsja pri kazhdoj sborke": vyzyvat posle
 # build_safe.ps1, ili vruchnuju. Pervyj zapusk s -Record zapisyvaet etalon.
 #
