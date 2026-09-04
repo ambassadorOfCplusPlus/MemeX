@@ -7082,3 +7082,26 @@ obuchit r1_corr na N-1 -> proverit perenos i pereizmerit predzagruzku.
 === VSE 5 SHAGOV PLANA ZAKRYTY. Coder Next IQ3_XXS: 118 ms/token (8,5 tok/s) tochno, 94 s repakom.
 Ot starta 164-337 ms svjornuto vdvoe. Dalshe: shirokij r1_corr (petlja vyshe), refaktoring v libmemex,
 llama-server integracija (docs/server_integration_map.md).
+
+
+## PERENOS R1 MEZHDU TEKSTAMI IZMEREN LOKALNO (zamena Kaggle, 5 sentjabrja 00:20)
+
+Sobrano 7 raznyh tekstov (bench/collect_dataset.ps1): kod 1044, ru 712, tech 520, switch/third/2000/kv
+po 1500 tokenov = ~7500 tokenov, ~1,6 GB dampov skrytyh sostojanij. Leave-one-out (bench/r1_transfer.py):
+obuchit R1 na 6 tekstah, proverit na otlozhennom 7-m.
+
+    bjudzhet   R1 na CHUZHIH (perenos)   na SEBE (potolok)   R0 (bez obuch.)   shtraf perenosa
+    16         86,2%                     96,0%               77,6%             -9,8
+    32         95,0%                     99,4%               89,8%             -4,3
+
+VYVOD: R1 OBOBSHCHAETSJA na neviydennyj tekst - perenos 86% protiv 78% u R0 (obuchenie na chuzhih
+realno pomogaet). Do potolka na svojom ~10 punktov - razryv zakryvaetsja shirokim korpusom. Hudshij
+tekst - tehnicheskij (74%, samyj korotkij i nepohozhij, nuzhny tehnicheskie sosedi). 7 tekstov malo,
+no napravlenie izmerimo. Eto to, radi chego byl Kaggle - sdelano lokalno, verifikacija telefona ne
+nuzhna.
+
+Boevoj predskazatel: D:\MemeXesults1_corr_multi.bin (obuchen na vseh 7, 25 MB, format dvizhka).
+SLEDUJUSHCHEE: pereizmerit predzagruzku shaga 5 s r1_corr_multi vmesto odnodokumentnogo (dolzhno podnjat
+used/issued: bylo 1,33/27, teper R1 luchshe perenositsja). No B=16 > top-k=10 vsjo ravno pereizbytochen
+i SSD ogranichen polosoj - realnyj vyigrysh zhdat na IQ4_XS (ne vlezaet v OZU) i holodnom starte, ne na
+IQ3_XXS ustanovivshemsja (tam i tak 0,14 promaha/token). Svip B=10..16 stoit sdelat.
