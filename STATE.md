@@ -6458,3 +6458,207 @@ i kontrol "odno plecho podrjad", i tolko ustanovivsheesja znachenie schitat skor
 hranilishchem shaga 4 (eksperty v privatnoj pamjati) etot effekt dolzhen ischeznut - proverit.
 Utochnjonnaja ocenka karty segodnja: ~127 ms/token = 43 karta + 3 golova + ~80 CPU-eksperty i
 chtenija; do ocenki 70 ms ne hvataet imenno chtenij.
+
+
+---
+
+## MATVEKTOR Q6_K UZHE NA POTOLKE VIDEOPAMJATI: gipoteza "67 GB/s" oprovergnuta zamerom
+
+Zadacha stavilas tak: matvektor Q6_K chitaet vesa 67,6 GB/s pri potolke 127-131, dotjanut do
+~120 i vyigrat 25-30 ms na tokjene. **Chisla ne podtverdilis. Jadro idjot 128-130 GB/s, to est
+na potolke, i uskorjat v njom nechego.** Nizhe - chem eto izmereno i pochemu ranshe vyhodilo 50-67.
+
+Instrument: `tests/test-backend-ops.cpp`, rezhim `perf -b Vulkan0 -o MUL_MAT`, kommit dvizhka
+9941d7e4. Dobavlen klass `test_mul_mat_w` - tot zhe MUL_MAT, no "GB/s" schitajutsja TOLKO po
+vesam src0. Bazovyj `op_size` u `test_mul_mat` beryot `nbytes(src1) * m`, to est umnozhaet
+vektor vhoda na chislo strok: pri m = 196608 eto 1,5 GiB vydumannogo trafika poverh 315 MiB
+nastojashchih vesov, i polosa pechatalas zavyshennoj vshestero. Dlja matvektora edinstvennyj
+chestnyj znamenatel - vesa.
+
+`MEMEX_MMV_ONLY=1` gonjaet tolko dobavlennye sluchai. Filtr `-o` dlja etogo ne godilsja:
+`eval_perf` stroit graf KAZHDOGO iz 1481 sluchaja i tolko potom sravnivaet imja operacii, tak
+chto krug zanimal dvenadcat minut vmesto sorok sekund.
+
+### Dva razmera, bez kotoryh zamer meril by ne to
+
+**1. BAR-okno 256 MiB.** `ggml_vk_create_buffer_device` (ggml-vulkan.cpp:1930) SNACHALA prosit
+`DEVICE_LOCAL|HOST_VISIBLE` - kommentarij v apstrime "use rebar if available". Na etoj karte
+takaja pamjat est tolko v BAR-okne na 256 MiB, i ljuboj bufer, kotoryj tuda vlez, chitaetsja
+3,1 GB/s vmesto 128. Formy samoj modeli (attn_qkv 13,8 MB) tuda lozhatsja vse. Poetomu m
+podobrano tak, chtoby vesa byli >256 MiB, a v vyvode stoit stroka-podtverzhdenie
+`bufer 315 MiB prosil host-visible, poluchil tolko device-local`.
+
+**2. Infinity Cache 16 MiB.** V rezhime `perf` odin i tot zhe uzel povtorjaetsja sotni raz. Vesa
+menshe 16 MiB posle pervogo progona chitajutsja iz kesha: izmereno **273-291 GB/s**. Poetomu
+nastojashchie formy sloja razmnozheny po tretjemu izmereniju (`bs={24,1}`, `{48,1}`) - geometrija
+stroki i chislo blokov na stroku te zhe, chto v modeli, a summa 315 MiB keshu ne po zubam.
+
+### Polosa matvektora, ne[1] = 1 (dekod). Dva progona kazhdyj
+
+    tip     forma (k x m)      vesa MiB   us/progon   GB/s
+    q6_K    2048 x 196608        315,0    2375-2394   128,5 / 129,5
+    q6_K    4096 x  98304        315,0    2393-2411   127,6 / 128,5
+    q8_0    2048 x 147456        306,0    2311-2333   128,1 / 129,3
+    q8_0    4096 x  73728        306,0    2290-2324   128,6 / 130,5
+    q4_K    2048 x 262144        288,0    2178-2223   126,6 / 129,1
+    q4_0    2048 x 294912        324,0    2682-2698   117,3 / 118,0
+    f16     2048 x  81920        320,0    2400-2424   128,9 / 130,2   <- kontrol bez dekvantizacii
+
+ROVNO formy statiki Coder Next (razmnozhennye, chtoby ne popast v kesh):
+
+    q6_K  attn_qkv  2048 x  8192 x24     128,5 / 130,0
+    q6_K  gate      2048 x  4096 x48     127,8 / 130,0
+    q6_K  ssm_out   4096 x  2048 x48     128,2 / 128,4
+    q8_0  attn_qkv  2048 x  8192 x24     120,9 / 121,6
+    q8_0  gate      2048 x  4096 x48     121,1 / 121,6
+    q8_0  ssm_out   4096 x  2048 x48     128,9 / 130,4
+
+Potolok videopamjati etoj karty, nezavisimo izmerennyj ranee (razdel 1 HANDOFF_ROUTER) -
+**127-131 GB/s**. Q6_K, Q8_0, Q4_K i f16 vse na njom. Dekvantizacija ne stoit nichego:
+f16 (bez dekvantizacii vovse) i q6_K razlichajutsja na 0,5 %.
+
+### Chto stavit potolok - pamjat, a ne jadro. Kontrol na keshirovannyh vesah
+
+Te zhe formy, no vesa MENSHE 16 MiB Infinity Cache, to est iz VRAM posle pervogo progona ne
+chitaetsja nichego; rabochih grupp pri etom tysjachi, tak chto zamer ne pro zapusk:
+
+    q6_K  2048 x 8192   13,4 MiB   44,03 us   291,1 GB/s
+    q6_K  2048 x 4096    6,7 MiB   23,42 us   273,7
+    q6_K  4096 x 2048    6,7 MiB   22,32 us   287,1
+    q8_0  2048 x 4096    8,5 MiB   29,87 us   277,9
+    q8_0  4096 x 2048    8,5 MiB   28,82 us   288,0
+
+**U jadra zapas 2,3 raza, i ego zakryvaet imenno VRAM.** Eto zakryvaet vopros nasovsem: ni
+chislo strok na rabochuju gruppu, ni razmer rabochej gruppy, ni subgroup-operacii, ni f16 vmesto
+f32 v nakoplenii ne mogut dat nichego, poka vesa prihodjat iz videopamjati. Edinstvennyj rychag
+na etom kanale - MENSHE BAJT: pri odnoj i toj zhe polose 128 GB/s perevod statiki s Q6_K
+(0,8203 bajta na ves) na Q4_K (0,5625) snjal by 31 % bajtov = 4,0 ms na tokjen. Eto reshenie
+pro kachestvo, ne pro shejder.
+
+Pobochno: raspoznavanie arhitektury na etoj karte NE srabatyvaet. `get_device_architecture`
+trebuet `VK_KHR_shader_integer_dot_product`, a drajver ego ne dajot (`int dot: 0` v zagolovke
+progona), poetomu vmesto `AMD_RDNA2` vozvrashchaetsja `OTHER`: `rm_kq` = 2, `rm_stdq` = 1,
+`requiredSubgroupSize` ne stavitsja vovse, `subgroup_size` = 32 iz svojstv. Tjuning pod RDNA2 v
+dereve est i k nam ne primenjaetsja - i, kak vidno iz zamera, ne nuzhen.
+
+### Otkuda bralis 50-67 GB/s: eto ne jadro, a peresechenie na PROSTAIVAJUSHCHEJ karte
+
+Dva istochnika soshlis v odno chislo, i oba - ne shejder.
+
+**Pervyj: ne[1] > 1.** Tot zhe matvektor pri neskolkih stolbcah obvalivaetsja (m = 196608 ili
+147456, k = 2048):
+
+    stolbcov   q6_K GB/s   q8_0 GB/s
+    1          128,5       128,1
+    2          125,2       115,8
+    4           62,5        70,9
+    8           35,1        43,4
+
+Istoricheskij zamer golovy v `gpu_static.cpp` (kommentarij okolo stroki 694) - "243 MB pri okolo
+50 GB/s" - snjat na PREFILLE, gde rjadov vosem. Pri vosmi stolbcah 35 GB/s i est ta cifra.
+**Prichina najdena i eto NE VRAM:** keshirovannyj kontrol pri vosmi stolbcah dajot 40,2 GB/s
+(q6_K, 13,4 MiB) protiv 291 pri odnom stolbce, to est vesa v keshe, a padenie ostajotsja.
+Uzkoe mesto - PERECHITYVANIE VEKTORA B: v `mul_mat_vec_q6_k.comp` zagruzki `data_b_v4` stojat
+VNUTRI cikla po strokam, i na kazhdye 210 bajt vesov prihoditsja 1024 bajta B na kazhduju stroku
+i kazhdyj stolbec. Trafik B po keshu: 673 GB/s pri odnom stolbce, 1,31 TB/s pri dvuh, 1,31 pri
+chetyrjoh, 1,47 pri vosmi - **on vyhodit na svoj potolok 1,3-1,5 TB/s uzhe na dvuh stolbcah**, i
+dalshe vremja rastjot linejno po stolbcam. Lekarstvo ochevidno (vynesti zagruzku B iz cikla po
+strokam - togda trafik delitsja na chislo strok), no na DEKOD ono ne vlijaet nikak: pri odnom
+stolbce jadro uprjotsja v VRAM ranshe. Poetomu pravka NE sdelana, tolko izmerena.
+
+**Vtoroj, i on vazhnee: cena peresechenija zavisit ot togo, naskolko karta zanjata.** V odnom i
+tom zhe progone golova - odna i ta zhe rabota na 243,4 MiB - stoit:
+
+    sloev na karte 48   head_ms 2,5735   -> 99 GB/s
+    sloev na karte 24   head_ms 3,7139   -> 69 GB/s   <-- vot eto i est "67 GB/s"
+    sloev na karte 12   head_ms 4,4653   -> 57 GB/s
+    sloev na karte  4   head_ms 4,4119   -> 58 GB/s
+    sloev na karte  1   head_ms 4,6182   -> 55 GB/s
+
+Chistoe jadro na etoj forme - 243,4 MiB / 128,5 GB/s = **1,99 ms**. Vsjo ostalnoe - nakladnye
+peresechenija, i oni tem bolshe, chem dolshe karta prostaivala do vyzova (RDNA2 gasit jadro pri
+prostoe; tot zhe effekt uzhe byl izmeren vyshe kak "static odin 0,277 protiv static + rezidentnye
+eksperty 0,234"). To est ljuboe "GB/s golovy", poluchennoe delenijem bajtov na polnoe vremja
+peresechenija, meryaet plan pitanija, a ne shejder.
+
+### Sverka posle vsego etogo
+
+`test -b Vulkan0 -o MUL_MAT`: **1475/1481**. Vse dobavlennye formy statiki (q6_K/q8_0/q4_0/q4_K
+pri m = 512, 513 i k = 2048, 4096; 513 vzjato nekratnym ljubomu rm, chtoby ispolnjalas vetka
+"strok menshe, chem NUM_ROWS") - OK. Shest otkazov k etoj rabote otnoshenija ne imejut i
+sushchestvovali do nejo, no ih nado znat, potomu chto `-o MUL_MAT` v etom dereve, sudja po
+`1469/1469` shaga 3b, nikto ne gonjal:
+
+    q4_K  s src1 = f16, m=16 n=16 k=256, chetyre sluchaja   NMSE 1,78-1,96
+    iq4_xs  s src1 = f32, m=16 n=1 k=256                    NMSE 0,0888   <-- VAZHNO
+    bf16    s src1 = f32, m=16 n=1 k=1                      NMSE 2,94
+
+**iq4_xs na Vulkan schitaet neverno**, a sledujushchaja model proekta - IQ4_XS. Do togo, kak ejo
+statiku kladut na kartu, eto nado pochinit ili ubeditsja, chto imenno etot tip na karte ne
+okazhetsja. Log: `D:\MemeX\results\q6k_test_mulmat.log`.
+
+## CENA PERESECHENIJA FIKSIROVANA I NE ZAVISIT OT CHISLA SLOEV NA KARTE
+
+Vopros koordinatora: 0,89 ms na peresechenie pri chistom jadre okolo 0,20 ms - eto postojannaja
+cena kruga submit/zabor (togda sloi nado obedinjat v odin submit) ili borba za ochered i kesh
+karty, rastushchaja s chislom sloev (togda obedinenie ne dast nichego)?
+
+Sposob: `MEMEX_CARD_LO/HI` suzhajut, kakie sloi VYZYVAJUTSJA na karte, a vesa i grafy vseh 48
+sloev pri etom vsjo ravno lezhat v videopamjati - raskladka pamjati vo vseh plechah odna,
+menjaetsja tolko chislo peresechenij za tokjen. Diapazony 0..3, 0..11, 0..23, 0..47 vse derzhat
+sootnoshenie delta:vnimanie ravnym 3:1 (vnimanie u qwen3next na kazhdom chetvjortom sloe), tak
+chto srednij sloj v nih odin i tot zhe. Skript `bench/vk_layer_sweep.ps1`, plechi peremeshany
+(48, 4, 24, 12, 1), logi `D:\MemeX\results\vk_layer_sweep\`.
+
+    sloev   peresechenij   na peresechenie, ms              na tokjen   nash tok/s
+    na karte  na tokjen    vsego = podjom+ustrojstvo+zabor
+    48          48         0,839 = 0,006 + 0,830 + 0,003     40,29      7,910
+    24          24         0,892 = 0,007 + 0,881 + 0,004     21,41      5,775
+    12          12         0,881 = 0,006 + 0,871 + 0,003     10,58      5,809
+     4           4         0,901 = 0,006 + 0,891 + 0,003      3,60      5,331
+     1           1         1,052 = 0,006 + 1,042 + 0,003      1,05      5,550
+
+**Otvet: cena FIKSIROVANA na peresechenie i s chislom sloev ne rastjot - ona dazhe NEMNOGO
+PADAET** (0,830 pri 48 slojah protiv 0,891 pri chetyrjoh i 1,042 pri odnom). Versija "borba za
+ochered" oprovergnuta: bud ona verna, 48 sloev stojali by dorozhe, a ne deshevle. Napravlenie
+padenija to zhe, chto u golovy vyshe: chem bolshe karta zanjata, tem deshevle otvet.
+
+Ogovorka pro plecho na odnom sloe: v njom tolko delta-sloj (sloj 0), sostav drugoj, i sravnivat
+ego s ostalnymi po srednemu nelzja. Tri tochki 12/24/48 s odinakovym sostavom - mozhno.
+
+### Uchjot 0,830 ms peresechenija pri 48 slojah, kazhdoe slagaemoe iz zamera
+
+    bajty statiki sloja  33,2 MiB / 128,5 GB/s (zamereno vyshe)     0,271 ms
+    zapusk dispatchej    30 x 7,2 us (dvizhok pechataet sam)         0,216
+    jadra delta-seti     svjortka+softplus+dve l2+delta (shag 3a)   0,053
+    postojannyj krug submit -> planirovshchik -> zabor (vyshe)      0,310
+    ----------------------------------------------------------------------
+    itogo                                                           0,850   izmereno 0,830
+
+Sovpadaet v predelah 2,4 %, to est **v peresechenii ne ostalos neobjasnjonnogo**. Ceny na
+tokjen pri 48 slojah:
+
+    postojannyj krug     0,310 x 48 = 14,9 ms   <- lechitsja TOLKO menshim chislom peresechenij
+    zapusk dispatchej    0,216 x 48 = 10,4 ms   <- lechitsja menshim chislom uzlov (slijanie QKV)
+    bajty vesov          0,271 x 48 = 13,0 ms   <- na potolke VRAM, tolko menshimi bajtami
+    ------------------------------------------------------------
+    38,3 iz izmerennyh 40,29 ms na tokjen na karte
+
+To est dva pervyh slagaemyh - 25,3 ms na tokjen, 63 % vremeni karty - **ne vychislenie vovse**,
+i imenno oni rychag; matvektor v etom spiske uzhe optimalen.
+
+### Chego NE izmereno v etom razdele
+
+- Pravka mnogostolbcovogo puti (vynos zagruzki B iz cikla po strokam) NE sdelana: na dekode ona
+  nichego ne dajot, a predskazannyj vyigrysh 2x pri ne[1]=4 i 8 ostalsja predskazaniem.
+- `ggml-vulkan.cpp` v etoj rabote NE pravilsja vovse - menjalsja tolko `tests/test-backend-ops.cpp`.
+  Znachit tok/s v tablice vyshe - ne A/B pravki, a zamer odnogo i togo zhe binarnika pri raznom
+  chisle sloev na karte; sravnivat ih s 7,17 iz shaga 3b mozhno tolko po plechu "48".
+- Razbros ne snjat: kazhdoe plecho svipa progonjalos ODIN raz (dva kruga byli by 40 minut zamka).
+  Plecho 48 dalo 7,910 tok/s protiv srednego 7,17 (razbros 18 %) u shaga 3b - v predelah togo
+  razbrosa.
+- 7,2 us na dispatch - chislo, kotoroe pechataet sam dvizhok; zdes ne peremerjano. Postojannye
+  310 us - iz razdela vyshe, zdes tozhe ne peremerjany, tak chto uchjot 0,850 protiv 0,830 opiraetsja
+  na dva chuzhih slagaemyh.
+- Pochemu q8_0 na formah attn_qkv i gate dajot 121 GB/s, a na ssm_out 129 - ne razobrano.
+- Pochemu q4_0 na 8 % nizhe ostalnyh (117,9) - ne razobrano; v statike Coder Next q4_0 net.
