@@ -6368,3 +6368,18 @@ eksperty, kotoryh prefill ne kasalsja (first_seen.py: 80 novyh na token v pervoj
 NE IZMERENO: IQ4_XS na karte; peresechenie 0,889 ms na sloj protiv ozhidanija ~0,5 (33 MiB pri
 67 GB/s) + 0,2 dispatchej - est zapas ~0,2 ms x 48 = 10 ms/token, ne razobran; zatraty OZU
 processa i chislo promahov stranic ne pechatajutsja.
+
+
+## A/B --gen 64 (4 sentjabrja 14:50): DLINNAJA GENERACIJA MEDLENNEE KOROTKOJ - MODEL NE VLEZAET V KESH
+
+step3b_ab.ps1 -Gen 64 -Rounds 2, plechi cheredovalis (D:\MemeXesults\step3b_gen64\):
+    karta: 3,63 / 4,23 tok/s  srednee 3,93  razbros 15%  (254 ms/token; na ustrojstve 43,0 ms = 48 x 0,895)
+    CPU:   3,67 / 3,55        srednee 3,61  razbros  3%  (277 ms/token)
+Pri --gen 8 bylo 131 i 190 ms. To est chem dolshe generacija, tem MEDLENNEE: eto ne holodnyj start,
+a ustanovivshijsja rezhim chtenij s SSD. Arifmetika: OZU 32 GB, svobodno v prostoe ~23,5 GB, a odni
+eksperty IQ3_XXS 24,6 GiB - v stranichnyj kesh ne vlezajut dazhe bez statiki; kazhdyj token chitaet
+desjatki ekspertov po 3,4 ms. Vyigrysh karty (+9% zdes, +36% na gen 8) tonet v chtenijah.
+Sledstvie: shag 4 (hranilishche s C ot svobodnoj pamjati, ~360-400/512, hvost s SSD) - ne uluchshenie,
+a uslovie raboty; ocenka po simuljacii pri C~380: 3-6 sinhronnyh promahov/token vmesto ~60.
+Ogovorka: vo vremja zamera dva svezhih agenta mogli chitat kod/dokumentaciju (bez sborok - zamok byl
+u zamera), CPU-vlijanie neznachitelno, no ne nulevoe.
