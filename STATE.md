@@ -6713,3 +6713,28 @@ iz 43 ms karty na token.
 BLOKER DLJA IQ4_XS: test-backend-ops -o MUL_MAT dal 6 otkazov (fil'tr v dereve ne gonjali),
 sredi nih iq4_xs NMSE 0,0888 - statika IQ4_XS-modeli v Q8_0, no EKSPERTY IQ4_XS, a esli kogda-to
 klast down_exps na kartu - eto porog. Pochinit dekvantizaciju iq4_xs na Vulkan do IQ4_XS na karte.
+
+
+## SHAG 4 A/B: HRANILISHCHE DAJOT 99,95% POPADANIJ, NO VDVOE-VPJATERO MEDLENNEE - DVOJNAJA PAMJAT
+
+A/B --gen 64, IQ3_XXS s C:, C=483 (94% avtovybor ot svobodnoj pamjati), zatravka + 32 tokena promta:
+    mmap kak sejchas:  cheredovanie 6,24 / 5,20 tok/s;  PODRJAD (ustanovivsheesja) 7,63 / 7,97 = ~125 ms/token
+    hranilishche C=483: 1,55 / 1,13 tok/s cheredovanie; podrjad 1,44 / 1,51 = 640-886 ms/token
+    popadanij 99,94-99,97%, sinhronnyh promahov 0,14-0,27 na token (1-4 ms) - POLITIKA REZIDENTNOSTI RABOTAET
+    NO: rabochij nabor 27+ GiB, promahov stranic 710-800 tysjach na 64 tokena
+
+DIAGNOZ (arifmetika, ne dogadka): hranilishche vydeljaet 23,94 GiB PRIVATNOJ pamjati, a fajl modeli
+ODNOVREMENNO otobrazhjon cherez mmap (26,5 GiB). Dve kopii teh zhe ekspertov v ~26 GB OZU ne
+vlezajut, OS molotit stranicami mmap (prefill ih trogaet, promahi chitajut s nih). Popadanija
+otlichnye, no cena - trjoshing. Chistyj mmap v ustanovivshemsja rezhime (page cache tjoplyj) DAJOT
+125 ms, i hranilishche ego ne pobilo, a uhudshilo v 5 raz.
+
+VYVOD: hranilishche objazano byt EDINSTVENNOJ kopiej rezidentnyh ekspertov, a ne dobavochnoj.
+Ono uzhe kopiruet ekspertov v sloty; nado, chtoby posle etogo stranicy mmap teh zhe ekspertov
+osvobozhdalis (Windows: eksperty NE otobrazhat cherez mmap voobshche, a chitat s fajla pryamym
+ReadFile v sloty; prefill i statika ostajutsja na mmap/karte). Tolko togda privatnye 24 GiB -
+edinstvennaja kopija, i trjoshing ischezaet. Repak R4 (1,96x na CPU-schjote ekspertov, -13 ms/token)
+imeet smysl TOLKO posle etoj pravki - inache ego s'edaet trjoshing. Eto sledujushchaja zadacha.
+
+CHISLO, kotoroe stoit pomnit: mmap v ustanovivshemsja = 125 ms/token (7,6-8,0 tok/s) - eto porog,
+kotoryj hranilishche dolzhno pobit, a ne 254 ms iz cheredujushchegosja A/B.
