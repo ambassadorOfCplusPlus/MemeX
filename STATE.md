@@ -7367,12 +7367,19 @@ zakachka na tot zhe HDD ubjot tajmingi).
 |---|---|---|
 | mx1 (qwen3moe) CPU                       | 86,5     | 11,6  |
 | mx1 KARTA (static+layers)               | 76,8     | 13,0  |
+| mx1 PIK (static+REZIDENTNYE eksperty, period-32, --no-ref) | ~50,5 | **19,74-19,80** |
 | gemma4 CPU                               | 149,4    | 6,7   |
 | gemma4 KARTA (static+layers+dense)      | 79,2     | 12,6  |
 | Coder Next IQ3_XXS CPU                   | 172,2    | 5,8   |
 | IQ3_XXS KARTA (static)                  | 121,8    | 8,2   |
 | IQ3_XXS static+store (C=512, hit~100%)  | 117,3    | 8,5   |
 | IQ3_XXS static+store+R4                  | 93,3     | 10,7  |
+
+VAZHNO (popravka polzovatelja, 5 sent.): 13,0 dlja mx1 - NE potolok, a nepolnaja konfiguracija (tolko
+static+layers, BEZ rezidentnyh ekspertov). Dokumentirovannyj PIK mx1 = 19,74 tok/s (stroka ~4244:
+qwen_noref C=16, popadanij 81,3%, karta 18,84 + cpu 10,78 s perekrytiem; pozzhe 19,80). Gemma pik na
+korotkom kontekste = 13,95 (ne 12,6 - tozhe odin syroj progon nizhe rekorda). Tablicu nizhe chitat kak
+"bystryj srez odnoj komandy", rekordy - po istorii STATE.
 
 VYVOD: STATIKA NA KARTE (RX6500XT) USKORJAET VSE TRI MODELI, a ne zamedljaet (zaglushka 264 eto prjatala):
 mx1 11,6->13,0, gemma4 6,7->12,6 (pochti vdvoe!), IQ3 5,8->8,5. Repak R4 na IQ3 dal eshchjo +25% (117->93 ms).
