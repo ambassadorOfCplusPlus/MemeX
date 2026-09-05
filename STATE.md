@@ -7359,3 +7359,27 @@ predskazatel: 2-3 nedeli, risk nizkij. B (polnaja kartochnaja obrabotka + Vulkan
 3-5 nedel, malyj vyigrysh na 4 GB. Rekomendacija: eksperiment, kvant IQ1_S-XL, merge apstrim-DS4 v nashu
 vetku, potom integracija priomov. Skachivanie IQ1_S-XL (57 GB) - POSLE vseh zamerov na D: (inache
 zakachka na tot zhe HDD ubjot tajmingi).
+
+
+## SVODNAJA TABLICA SKOROSTEJ (5 sentjabrja, --gen 32 podrjad, steady bez holodnogo r1; zaglushka 264,0 byla PARSER-BAG, ispravleno)
+
+| konfig                                  | ms/token | tok/s |
+|---|---|---|
+| mx1 (qwen3moe) CPU                       | 86,5     | 11,6  |
+| mx1 KARTA (static+layers)               | 76,8     | 13,0  |
+| gemma4 CPU                               | 149,4    | 6,7   |
+| gemma4 KARTA (static+layers+dense)      | 79,2     | 12,6  |
+| Coder Next IQ3_XXS CPU                   | 172,2    | 5,8   |
+| IQ3_XXS KARTA (static)                  | 121,8    | 8,2   |
+| IQ3_XXS static+store (C=512, hit~100%)  | 117,3    | 8,5   |
+| IQ3_XXS static+store+R4                  | 93,3     | 10,7  |
+
+VYVOD: STATIKA NA KARTE (RX6500XT) USKORJAET VSE TRI MODELI, a ne zamedljaet (zaglushka 264 eto prjatala):
+mx1 11,6->13,0, gemma4 6,7->12,6 (pochti vdvoe!), IQ3 5,8->8,5. Repak R4 na IQ3 dal eshchjo +25% (117->93 ms).
+OGOVORKA: store-plechi s auto-C=512 = "vsjo rezidentno", NE scenarij overflow; chisla syrye (odin progon,
+parser ispravlen post-faktum). Chistyj peremer - skript bench/speed_table.ps1 (ispravlennyj parser, odin
+process bez perezagruzki modeli na kazhdyj progon - TODO). IQ4_XS s polnym tjoplym urovnem - bench/iq4_floor.ps1
+(gotov, ne zapushchen; auto-C ostavit ~9 GiB overflow, tjoplyj uroven na SSD C:).
+
+Gemma4 s kartoj 12,6 tok/s - otdelnyj horoshij rezultat: dlja nejo predlozhenie polzovatelja "predskazatel/
+statiku na vidjuhu" uzhe rabotaet (golova+static+dense na karte), ostajotsja predskazatel ekspertov perenesti.
