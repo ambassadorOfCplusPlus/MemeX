@@ -7333,3 +7333,29 @@ i odnogo slota; (v) hranilishche ekspertov - uzel id->slot v llm_build_moe_ffn +
 otlozhennogo puti; (g) kolcevoj KV - geometrija buferov v llama_kv_cache_init; (d) predskazatel R1
 - snjatie skrytogo sostojanija v processe + selektivnyj prefetch_experts. Golova gejtuetsja na odin
 token: dlja multislota/prefila ostajotsja shtatnyj matmul (razdel 3 karty, variant A).
+
+
+## DEEPSEEK V4 FLASH: ARHITEKTURA UZHE V APSTRIME FORKA (issledovanie, docs/deepseek_v4_port.md, 5 sentjabrja)
+
+GLAVNOE: port pochti ne nuzhen. V dereve D:\MemeX\src\ik_llama.cpp uzhe est LLM_ARCH_DEEPSEEK4:
+build_deepseek4.cpp (1683 str), llama-dsv4.cpp (1798, szhatie KV), CPU+CUDA jadra vseh operacij,
+MTP-golova, spekuljativnyj DSpark, iqk s MXFP4/IQ1_S. Kommity ik_llama #2216/2238/2257/2266/2280/2309.
+NASHA vetka memex pozadi origin/main - nuzhen merge/rebase chtoby vzjat eti kommity.
+CSA/HCA = flash_attn_ext + MLA deepseek2 + obychnyj mul_mat_id-MoE (top-6/256 + obshchij), NE novye
+jadra. Novyh tolko 4 melkie operacii otbora (INDEXER_TOPK, MASK_TOPK, SINKHORN, MASK_TO_IDX) - est
+CPU+CUDA, NET Vulkan (0 shejderov), no na 4 GB VRAM DS4 pochti ne lezet, tak chto ih mozhno ostavit
+na CPU (Vulkan-port - optimizacija, ne bloker).
+
+VLEZAET NA D: (90,5 GB svobodno): TOLKO IQ1_S-XL (57,3 GB, persadian/DeepSeek-V4-Flash-GGUF). Q2_K_S
+98,6 / Q2_K 103-117 / MXFP4 155 - ne vlezajut dazhe fajlom. Model lezhit na HDD D:, C: SSD (25 GB) -
+pod ~20 GB tjoplogo urovnja.
+
+OCENKA TOK/S: ekspert IQ1_S ~5,1 MB, 240 obrashchenij/token ~1,22 GB trafika; pri ~41% rezidentnosti
+i HDD kak posled1nem urovne CHESTNO 2-4 tok/s, potolok ~5. 5-10 NEDOSTIZHIMY na etom zheleze (nuzhno
+~64 GB OZU ili model celikom na SSD). Kachestvo na 1,6 bit slaboe.
+
+PUT: A (rekomenduetsja) - shtatnyj llama-server, komput na CPU, golova na karte, nashi ExpertStore +
+predskazatel: 2-3 nedeli, risk nizkij. B (polnaja kartochnaja obrabotka + Vulkan 4 operacij + stoki):
+3-5 nedel, malyj vyigrysh na 4 GB. Rekomendacija: eksperiment, kvant IQ1_S-XL, merge apstrim-DS4 v nashu
+vetku, potom integracija priomov. Skachivanie IQ1_S-XL (57 GB) - POSLE vseh zamerov na D: (inache
+zakachka na tot zhe HDD ubjot tajmingi).
