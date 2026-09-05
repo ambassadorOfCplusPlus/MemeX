@@ -7390,3 +7390,28 @@ process bez perezagruzki modeli na kazhdyj progon - TODO). IQ4_XS s polnym tjopl
 
 Gemma4 s kartoj 12,6 tok/s - otdelnyj horoshij rezultat: dlja nejo predlozhenie polzovatelja "predskazatel/
 statiku na vidjuhu" uzhe rabotaet (golova+static+dense na karte), ostajotsja predskazatel ekspertov perenesti.
+
+
+## REKORDY PO MODELJAM (svedeno 5 sentjabrja po vsemu zhurnalu; IZMERENO otdelno ot RASCHJOTOV)
+
+| model | PIK izmeren | kak dostignut | stroka |
+|---|---|---|---|
+| Qwen3-30B mx1 (odnorodnyj iq4_xs, 16,5 GB) | **19,80** | static na karte + rezidentnye eksperty C=16, period-32, --no-ref; vosproizvedeno na tekushchem binarnike | ~4886 |
+| Qwen3-30B Q6_K_XL | **14,57** | to zhe + chestnaja jomkost slotov PO SLOJAM (6->8 slotov, smeshannye kvanty) | ~4885 |
+| Gemma 4 26B-A4B, korotkij kontekst | **13,95** | golova+vnimanie+KV+PLOTNAJA FFN na karte (+23,3%), eksperty na CPU; polosa sessii 13,55-13,95 | ~4803 |
+| Gemma 4, kontekst 5500 | **9,47** | MEMEX_SWA_NARROW + avtosnjatie golovy + KOLCEVOJ KESH okna; x16,3 ot 0,581 | ~5138 |
+| Gemma 4, kontekst 16384 | 7,83 | --prefill-chunk 128 (kvadratichnyj kq po kusku, ne po promtu); chislo iz parallelnoj sessii, v etom zhurnale ne produblirovano | - |
+| Coder Next IQ3_XXS (26,5 GB, ne vlezaet) | **10,7** s repakom R4 (menjaet 1 token/16) / **8,5 TOCHNO** | static na karte + ExpertStore (prjamoe chtenie mimo mmap, edinstvennaja kopija) + R1-predzagruzka | ~7082 |
+| Coder Next IQ4_XS (38,7 GB) | **2,62** | tjoplyj SSD-uroven 3 GiB (+30% ot 2,02); polnyj tjoplyj uroven ne zamerjan (iq4_floor.ps1 gotov) | ~7237 |
+| Qwen3.6-35B-A3B | 5,76 | baseline llama-cli forka; NASH dvizhok ejo poka ne obgonjal (chislo parallelnoj sessii) | - |
+
+OTKUDA "GEMMA 15+": eto RASCHJOTY, ne zamery. Vse proekcii svedeny tut, chtoby ih ne putat s rekordami:
+- Gemma ~15,3 - razgon OZU 2400->3200 (raschjot ot izmerennoj polosy 24,8 GB/s, ~4306). Tuda zhe Kvin ~20,8:
+  porog 20 tok/s perehoditsja RAZGONOM OZU - samyj deshjovyj neproverennyj rychag.
+- Gemma 14,6 (MTP n=1, chernovik na hoste) i 17,5-19,5 (chernovik na karte) - pereschjot proekcii na izmerennyh
+  cenah (~4937). Zapreshchajushchij resurs - 446 MB VIDEOPAMJATI, kotoryh net; s chernovikom na hoste vsego +4%.
+  Izmerena tolko kombinacija "plotnaja FFN na host, chernovik na kartu" = 14,5 - otvergnuta (ne stoit mashinerii MTP).
+- Kvin 25,6 - odno peresechenie karta<->host vmesto 49 (~2474); zablokirovano: MoE sloja L schitaet CPU,
+  odnim grafom ne sobrat.
+Vse rekordy snjaty s --no-ref; odinochnye progony na modeljah, ne vlezajushchih v OZU, NEDEJSTVITELNY
+(2,97 protiv 6,01 na odnoj komande - stranichnyj kesh), merit cheredovaniem.
