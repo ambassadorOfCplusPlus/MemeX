@@ -7473,3 +7473,21 @@ luchshe. ITOG: chislo potokov NEJTRALNO (+-5% shum), nadjozhnogo vyigrysha net, 
 Chestnyj null-rezultat. Mikro-patchi horjachego puti (vynos vektorov)
 oformleny v docs/decode_hotpath_patches_2026-09-06.md - NE primeneny nochju (vyigrysh <0,1%, ne
 stoit nesupervizируemoj peresborki).
+
+
+## ====== ITOG NOCHI 6 sentjabrja (avtonomno) ======
+1. Qwen3.6-35B-A3B IQ4_XS (17,7 GB): 5,76 (ne vlezal Q6) -> 11,18 tok/s x1,94. Sverka 15/16.
+   static na karte + ExpertStore 256/256 rezidentno. CHETVJORTAJA arhitektura v dvizhke rabotaet.
+   R4-repak i tjuning potokov proboval - ne pomogli (potok nejtralen, R4 huzhe pri 100% rezident).
+2. DeepSeek V4 Flash: VERDIKT - 3-5 tok/s FIZICHESKI nedostizhimy na etom zheleze. Ni odin 2-bit
+   ne vlezaet na D: (menshij 81 GB > 74 svobodno), vlezaet tolko IQ1_S-XL 57 GB (1,6-bit) -> realno
+   0,3-1 tok/s (pul ekspertov 52 GB vs 21 GB rezidentno v OZU, ostatok s SSD/HDD v 30-350x medlennee
+   vychislenij). arch deepseek4 UZHE v vetke. 3-5 trebujut 64 GB OZU ili NVMe - APGREJD. REShENIE
+   POLZOVATELJA: kachat li 57 GB IQ1_S-XL radi eksperimenta (<1 tok/s) - ja NE zapustil avtonomno.
+3. Dvizhok: agent podtverdil - gorjachij put uzhe silno optimizirovan; 48 submit/token strukturno
+   zablokirovan (MoE na CPU mezhdu blokami karty). Mikro-patchi (<0,1%) v docs/decode_hotpath_
+   patches_2026-09-06.md dlja dnevnoj sborki. Potoki nejtralny (-t 8 ostajotsja).
+4. Router: RT-N11P zavis ot peregreva (otvalilsja radiator), proshit udaljonno nelzja. Polnyj plan
+   TFTP+relayd v docs/router_openwrt_flash_plan.md - zhdjot remonta radiatora rukami. arslanbek na
+   kanale 12. TP-Link RE - model neizvestna, ne proshivat.
+PK OSTAVLEN VKLJUCHENNYM (ne usypljon): DeepSeek-zakachka - reshenie polzovatelja, son otrezal by ego.
