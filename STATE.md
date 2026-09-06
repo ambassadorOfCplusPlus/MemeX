@@ -7560,3 +7560,15 @@ REAP-DeepSeek (NAJDEN na HF, luchshe polnogo 90 GB kotoryj kachaem):
   1,5-3 tok/s vmesto <1. Kachestvo pochti bez poter (REAP structural, eksperty bit-identical).
 - jabbatheduck/DeepSeek-v4-flash-mini: 160/256 ekspertov.
 RESHENIE POLZOVATELJA: pereklyuchit zakachku na REAP-45GB (13 GB polnogo otbrosit) ili dokachivat 90 GB.
+
+## SET: UZKIM MESTOM ZAKACHKI BYL WiFi-SVISTOK, NE VPS (6 sent vecher, POPRAVKA)
+Ves den ja pripisyval potolok ~2,3-2,7 MB/s VPN-VPS - NEVERNO. Vse zamery (VPN, obhod, zerkala,
+aria2c -x16) shli cherez USB-svistok RTL8188EU i vse upiralis v NEGO (realno ~2,5 MB/s, hotja
+link 72 Mbit). PK perenesjon v prihozhuju, kabel 1 Gbit prjamo v LAN TUF-AX4200:
+    HF napryamuju po kabelju   6,55 MB/s   (bylo 2,47 po svistku, x2,65)
+    HF cherez VPN po kabelju   6,38 MB/s   (VPS NE uzkoe mesto - dajot 6,4 spokojno)
+    RF-zerkala (yandex/selectel) 1,1 - MEDLENNEE HF, HF = samyj bystryj istochnik.
+UROK (v pamjat): link-rate WiFi != realnaja propusknaja; deshjovyj USB2-svistok rezhet v 2-3x; dlja
+bolshih zakachek - tolko kabel v glavnyj router. DeepSeek 90 GB: ETA s 7 ch -> ~2,5 ch.
+Obhod VPN dlja aria2c/curl nastroen (process_name v sing-box, bez process_path - te lomali JSON),
+no po skorosti ravno VPN - polezen dlja razgruzki VPS.
