@@ -31,8 +31,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from route_lab import load_trace, prior_from  # noqa: E402
 from hidden_lab import load_hidden, load_routers, ridge  # noqa: E402
 
-MISS_SSD_MS = 3.616
-SSD_READS_PER_S = 380.0
+MISS_SSD_MS = 3.4
+SSD_READS_PER_S = 280.0
 
 
 def train_r1(H, W, k, half, ok_mask):
