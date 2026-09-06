@@ -7531,3 +7531,14 @@ UROK: layer_readback_mapped snachala udalil oshibochno - grepal tolko po gpu_*, 
 memex-fwd.cpp:10007. Sborka pojmala (%llu bez arg), vernul. Pravilo: proverjat ssylki po VSEMU derevu.
 OSTAVLENY: d_pad_/kv_pad_ (strukturnyj BAR-padding), stat readback_mapped (:10134). Disciplina pauzy
 zakachki na regressijah soblюdena. Monolit memex-fwd.cpp (10325) NE pilil - otdelnoj sessiej (risk grafa).
+
+## NEZAVISIMAJA VALIDACIJA "stok vs maksimum" (6 sent, chistyj agent BEZ nashego konteksta)
+Agent schital ot fiziki zheleza, ne znaja nashih rezultatov:
+- Qwen3-30B MoE (3,3B aktiv, 16 GB Q4): stok CPU 9-12 tok/s, potolok OZU 13,4, so statikoj-na-karte
+  potolok ~19 / realno 14-17. NASH REZULTAT 19,8 = NA ego potolke (dazhe vyshe "realnyh", KPD ~100%
+  potolka vs ego dopushchenie 75-85%). => 19,8 NE razdutaja cifra, a fizicheskaja stena. Bolshe tolko
+  razgonom OZU (samyj deshjovyj neproverennyj rychag, sm. vyshe).
+- Ne vlezajushchij 80B (kak DeepSeek): stok HDD 0,1-0,3, maks striming <1-2, "5-8 TOLKO esli vlezet v
+  OZU (<28 GB)". DeepSeek 2-bit = 90 GB, ne vlezaet => nash verdikt 0,3-1 podtverzhdjon nezavisimo.
+- RX6500XT kak compute-offload pochti bespolezen (PCIe x4 + 256 MB BAR), no cenen kak DOM dlja maloj
+  statiki (imenno tak my i delaem). Vyvod agenta sovpal s nashej arhitekturoj.
