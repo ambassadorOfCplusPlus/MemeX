@@ -7523,3 +7523,11 @@ DISCIPLINA (popravka polzovatelja): zakachka DeepSeek pauzitsja na vremja LJUBYH
 no vsjo ravno pauzim dlja skorosti. Dead-code (step_mask_sent_ i dr.) NE udaljon: simvoly imejut
 3-6 vhozhdenij (write-only s mestami zapisi), ne trivialnoe udalenie - otdelnoj sessiej. Raspil
 monolita memex-fwd.cpp (10325 strok) - tozhe otdelnoj sessiej (shag 4, vysshij risk dlja grafa).
+
+## DEAD-CODE UDALJON (6 sent, verificirovano sborkoj+16/16): commit 65b819b9
+Ubrano: step_mask_sent_ (write-only, pole + 4 prisvaivanija), readback_mapped() metod + out_mapped_
++ out_mapped_probed_ (metod nikogda ne vyzyvalsja), LayerGraph::mapped_probed (write-only), had/(void)had.
+UROK: layer_readback_mapped snachala udalil oshibochno - grepal tolko po gpu_*, a on PECHATAETSJA v
+memex-fwd.cpp:10007. Sborka pojmala (%llu bez arg), vernul. Pravilo: proverjat ssylki po VSEMU derevu.
+OSTAVLENY: d_pad_/kv_pad_ (strukturnyj BAR-padding), stat readback_mapped (:10134). Disciplina pauzy
+zakachki na regressijah soblюdena. Monolit memex-fwd.cpp (10325) NE pilil - otdelnoj sessiej (risk grafa).
