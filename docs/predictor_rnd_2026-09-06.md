@@ -128,3 +128,17 @@ podnjat default reserve do ~8-10 GiB, libo vychest ocenku mmap modeli. Dlja zame
 --expert-store C (256 = 16,7 GiB rezidentno, vlezaet s zapasom ~3 GB) ILI --expert-store-reserve 9000.
 Prognoz agenta "4,6 tok/s pri C=330" predpolagal chto rezident VLEZAET - na 32 GB s mmap modeli net;
 chestnyj potolok na 32 GB - C~256 (bolshe overflow na SSD warm-uroven). PEREZAMER s C=256.
+
+## VERDIKT PO BAZLAJNU (6 sent ~21:45): CHISTYJ ZAMER NA 32 GB NEDOSTIZHIM DLJA 41-GB IQ4_XS
+Probovali: (1) --expert-store-auto C=330 -> 21,5 GiB rezident + mmap 41 GB = tosnit, "rezident" v
+pagefile, 0,04 tok/s. (2) --expert-store 256 (16,7 GiB) -> vsjo ravno tosnit na ZAPOLNENII (mmap-
+istochnik modeli + privatnyj bufer oba v OZU, svob 0,3-0,7 GB, CPU ~0, I/O 30 MB/s beskonechno).
+(3) --no-mmap C=256 -> llama gruzit VES tensor-buffer 36,6 GiB v OZU (ne propuskaet eksperty pod
+ExpertStore) + 16,7 rezident = OOM. VYVOD: na 32 GB s modelju 41 GB bolshoj rezidentnyj nabor
+NEDOSTIZHIM chisto - sled modeli konkuriruet s buferom. 2,62 tok/s (warm 3 GiB, nizkaja rezidentnost)
+- prakticheskij potolok pri etoj OZU. Prognoz 4,6-7,5 (system_sim) PREDPOLAGAL chto rezident vlezaet.
+FIKS DVIZHKA (glavnyj dlja ne-vlezajushchih na malom OZU): posle togo kak ExpertStore skopiroval
+eksperta v privatnyj slot - EVICT sootvetstvujushchuju stranicu mmap modeli (madvise MADV_DONTNEED /
+VirtualUnlock / PrefetchVirtualMemory-obratno), chtoby istochnik ne ostavalsja rezidentnym. Togda
+rezident = tolko privatnyj buffer + static, i C=256 vlezet s zapasom. Bez etogo - libo bolshe OZU,
+libo nizkaja rezidentnost (2,62). Eto SLEDUJUSHCHIJ konkretnyj shag dvizhka (ne konfig).
