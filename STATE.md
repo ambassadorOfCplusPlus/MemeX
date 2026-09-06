@@ -7574,3 +7574,8 @@ Obhod VPN dlja aria2c/curl nastroen (process_name v sing-box, bez process_path -
 no po skorosti ravno VPN - polezen dlja razgruzki VPS.
 DOPOLNENIE: po kabelju aria2c -x16 na 2 sharda = 11,6 MB/s (Ethernet RX zamer) - mnogokonnekt
 MASSHTABIRUETSJA na kabele (ranshe "ne pomogal" tolko iz-za svistka). DeepSeek ETA ~1,2 ch.
+VERDIKT PO SETI (reshajushchij test): LINK NASYSHCHEN NA ~100 Mbit. aria2c odin 11,29 MB/s (95 Mbit);
++ parallelnaja zakachka yandex-ISO = 11,47 (96) - SUMMA NE VYROSLA => truba ~100 Mbit. Ne HF (2 IP =
+to zhe), ne soedinenija (62 vs 31 ravno), ne svistok (kabel 1 Gbit v TUF). Tarif 200 Mbit NE dohodit:
+potolok vyshe TUF (WAN-aplink / kabel modem->TUF / modem / provisioning ISP). 11,5 MB/s = MAKSIMUM
+etogo linka. DeepSeek dokachaetsja ~1 ch. Proverit v TUF UI: WAN link speed 100 ili 1000.
