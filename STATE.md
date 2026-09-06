@@ -7572,3 +7572,5 @@ UROK (v pamjat): link-rate WiFi != realnaja propusknaja; deshjovyj USB2-svistok 
 bolshih zakachek - tolko kabel v glavnyj router. DeepSeek 90 GB: ETA s 7 ch -> ~2,5 ch.
 Obhod VPN dlja aria2c/curl nastroen (process_name v sing-box, bez process_path - te lomali JSON),
 no po skorosti ravno VPN - polezen dlja razgruzki VPS.
+DOPOLNENIE: po kabelju aria2c -x16 na 2 sharda = 11,6 MB/s (Ethernet RX zamer) - mnogokonnekt
+MASSHTABIRUETSJA na kabele (ranshe "ne pomogal" tolko iz-za svistka). DeepSeek ETA ~1,2 ch.
