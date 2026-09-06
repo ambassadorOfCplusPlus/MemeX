@@ -275,3 +275,11 @@ namespace `memex_head`; вторичные правки `memex_cc`/`memex_share_
 - Поведение под нагрузкой/на других картах — только статический анализ; ни один прогон не делался.
 - Полная валидация всех 78 флагов CLI на взаимоисключения — проверены основные (W3 ~6613-6798).
 - `zadacha` — по прямому запрету не открывалась.
+
+## Statusnaja pripiska (6 sentjabrja 2026)
+Top-5 bagov: #1 (null-deref out), #2 (proba ekspertov po sloju 0), #3 (hw_caps devs[0]), #5 (GGML_STATUS
+otbros) - ISPRAVLENY v commit cb09d5cc. #4 (uchjot obshchego eksperta v statistike promahov/bajtov) -
+NE ispravlen: trebuet ponimanija potoka shared-eksperta i proverki ZAMEROM (ne regressiej tokenov,
+tokeny ot etogo ne menjajutsja) - sledujushchaja sessija. Mjortvyj kod (razdel nizhe) - bezopasnyj
+podnabor udaljon v commit 65b819b9 (step_mask_sent_, readback_mapped()+out_mapped_, mapped_probed,
+had); OSTAVLENY d_pad_/kv_pad_ (strukturnyj BAR-padding), layer_readback_mapped (pechataetsja v :10007).
