@@ -7462,3 +7462,14 @@ VYVOD: kachat 57 GB IQ1_S-XL radi <1 tok/s - somnitelno (16 ch zakachki, zamok d
 Reshenie za polzovatelem. Integracija (esli reshit): ~2-3 nedeli cherez stock llama-server
 (deepseek4 tam rabotaet) + ExpertStore cherez -ot exps=CPU + R1 na trasse DS4. Vulkan-port 4 opov
 ne stoit (DS4 edva v 4 GB VRAM). [[night-plan-2026-09-06]]
+
+## SVIP POTOKOV (6 sent, ideja agenta "-t 8 huzhe dlja memory-bound"): pochti PLOSKO, -t 6 chut luchshe
+Chistyj zamer tolko na 35B odin (drugie svipy isporcheny vytesneniem page-cache: mx1 15GB + gemma
+15GB > 24GB kesha, holodnyj start daval 2,8 tok/s-musor). 35B CPU progret: t4=6,56 t5=6,46 t6=6,85
+t8=6,70 tok/s - razbros 6%, shum. Vyvod: shina OZU nasyshchaetsja uzhe 4 potokami, 8 ne shtrafujut.
+Gipoteza "silno menshe potokov bystree" NE podtverzhdena. PIK-konfig (static+ExpertStore) reshil
+spor okonchatelno: -t 6 = 10,29, -t 8 = 10,64 tok/s - na REALNOM konfige 8 potokov DAZHE chut
+luchshe. ITOG: chislo potokov NEJTRALNO (+-5% shum), nadjozhnogo vyigrysha net, OSTAVLJAEM -t 8.
+Chestnyj null-rezultat. Mikro-patchi horjachego puti (vynos vektorov)
+oformleny v docs/decode_hotpath_patches_2026-09-06.md - NE primeneny nochju (vyigrysh <0,1%, ne
+stoit nesupervizируemoj peresborki).
