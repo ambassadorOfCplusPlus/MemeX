@@ -7542,3 +7542,21 @@ Agent schital ot fiziki zheleza, ne znaja nashih rezultatov:
   OZU (<28 GB)". DeepSeek 2-bit = 90 GB, ne vlezaet => nash verdikt 0,3-1 podtverzhdjon nezavisimo.
 - RX6500XT kak compute-offload pochti bespolezen (PCIe x4 + 256 MB BAR), no cenen kak DOM dlja maloj
   statiki (imenno tak my i delaem). Vyvod agenta sovpal s nashej arhitekturoj.
+
+## AGENTY 6 sent: universalizacija + REAP-DeepSeek (vazhno)
+UNIVERSALIZACIJA (scorecard): hw_caps pochinil VRAM/BAR (portabelno mezhdu kartami ODNOGO vendora).
+BLOKIRETSJA: CUDA/NVIDIA (Vulkan zahardkozhen: ggml_backend_vk_* gpu_static:349, gpu_experts:740),
+Linux/Mac (direct-read tolko Windows: expert_store:149-151, Win32 I/O povsjudu). NEEDS-WORK:
+threads=4 zahardkozhen (memex-fwd:5989, net core-detekta - LJOGKIJ fiks hardware_concurrency),
+on-card C ne shkaliruetsja ot VRAM (sized ot RAM hw_caps:300), NVMe polosa fixed-by-type
+(hw_caps:96), arch-dispatch = ternarnyj spageti (~25 vetok arch_q3/g4/q35, ne reestr; dense
+n_expert<=0 OTKAZ memex-fwd:6625; deepseek4 ne podkljuchjon). TOP-3: (1) backend-abstrakcija cherez
+ggml device-registry -> otkroet CUDA/ROCm/Metal; (2) portable direct-I/O (pread/O_DIRECT); (3)
+arch-reestr {detect,collect,build,caps,is_dense} + avto-threads + avto-tjuning tierov.
+
+REAP-DeepSeek (NAJDEN na HF, luchshe polnogo 90 GB kotoryj kachaem):
+- sleepyeldrazi/deepseek-v4-flash-reap-k128-Q2-GGUF: 50% ekspertov udaleno + IQ2_XXS/Q2_K, ~45 GB
+  (vdvoe menshe!), drop-in s ds4-runtime. Pul ekspertov vdvoe menshe -> blizhe k OZU -> potencialno
+  1,5-3 tok/s vmesto <1. Kachestvo pochti bez poter (REAP structural, eksperty bit-identical).
+- jabbatheduck/DeepSeek-v4-flash-mini: 160/256 ekspertov.
+RESHENIE POLZOVATELJA: pereklyuchit zakachku na REAP-45GB (13 GB polnogo otbrosit) ili dokachivat 90 GB.
