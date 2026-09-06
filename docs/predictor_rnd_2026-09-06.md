@@ -142,3 +142,22 @@ eksperta v privatnyj slot - EVICT sootvetstvujushchuju stranicu mmap modeli (mad
 VirtualUnlock / PrefetchVirtualMemory-obratno), chtoby istochnik ne ostavalsja rezidentnym. Togda
 rezident = tolko privatnyj buffer + static, i C=256 vlezet s zapasom. Bez etogo - libo bolshe OZU,
 libo nizkaja rezidentnost (2,62). Eto SLEDUJUSHCHIJ konkretnyj shag dvizhka (ne konfig).
+
+## POPRAVKA K VERDIKTU (agent, ~21:50): prichina NE mmap-konkurencija, a BAG UChJOTA reserve
+Agent proveril: ExpertStore fill idjot cherez NEZAVISIMYJ CreateFileA/ReadFile handle s
+FILE_FLAG_NO_BUFFERING (expert_store.cpp:536-541) - mmap-stranicy ekspertov modeli NE foltjatsja
+voobshche (NO_BUFFERING mimo page-cache). Grafovye mul_mat_id berut PRIVATNYE sloty, ne model-
+tenzory (memex-fwd:3289-3298). Znachit "20 GiB mmap ekspertov rezidentno" - NEVERNAJA gipoteza,
+madvise-evict celit v stranicy chto nikto ne foltit. NASTOJASHCHAJA prichina: auto_capacity
+(expert_store.cpp:265-273) i fit-check (memex-fwd:7614) sчитают C ostavljaja tolko RESERVE bajt,
+a --expert-store-reserve DEFAULT 2048 MiB (memex-fwd:4729). Eti 2 GiB dolzhny vmestit VSJU
+ne-store rezidentnost: static-tenzory (attn/norm/router/shared-exp/embd/output ~5-6 GiB dlja 30B-A3B),
+KV-kesh, ggml compute/graph buffery (1-2 GiB), io_buf, OS. 2 GiB kritichno malo => privatnyj buffer
+provizhnitsja SLISHKOM BOLSHIM i chastichno vytesnjaetsja. FIKS (prostoj, ne madvise):
+ (a) --expert-store-reserve 8000-9000 (8-9 GiB) pri --expert-store-auto, ILI
+ (b) yavnyj C nizhe: C=192 (12,5 GiB privatno + 6 static + 2 KV/compute + 6 OS + 2 sess = ~28,5, svob ~3,5)
+ (c) DVIZHOK: auto_capacity dolzhen vychest ocenku static+KV+compute, ne tolko OS-reserve (nastojashchij fiks).
+PEREZAMER posle sha256: --expert-store 192 (ili auto --expert-store-reserve 9000). Infrastruktura
+Windows-evict (VirtualUnlock, defer_experts, drop_mmap_expert_pages) EST no inertna (dontneed_fragment
+no-op na Windows llama-mmap.cpp:551-554, index tolko __linux__ llama.cpp:5108) - NE nuzhna dlja etogo,
+tolko esli --ref/--decode-check faltit model-eksperty (togda Option A: VirtualUnlock + snjat __linux__ gate).
