@@ -7510,3 +7510,16 @@ PLAN EKSPERIMENTA S PREDSKAZATELEM (kogda skachaetsja):
    tak chto imenno zdes on nuzhnee vsego. Eto i est ideja polzovatelja.
 Chestno: potolok skorosti 0,3-1 tok/s ostajotsja (disk-bound), no eksperiment s predskazatelem
 validen - marshrutizacija ta zhe pri ljubom kvante.
+
+## CHISTKA DVIZHKA PRIMENENA I PROVERENA (6 sent, dnjom, parallelno zakachke)
+Sobrano cherez build_safe (sborka godna, exe zapuskaetsja), regressija golden 16 tokenov na 3
+arhitekturah - VSE 16/16 (qwen3moe_mx1, gemma4, qwen3next), patchi byte-identical:
+- ee26688d: diagnostika/otkazy printf -> fprintf(stderr) (sampler + expert_store) - ne zasorjat
+  potok tokenov v server-rezhime.
+- cfe36cea: vynos per-token vektorov v static thread_local (set_step plan_lo/plan_len, sync_slots
+  freelist, refresh ord/need/free_slots) - ubiraet malloc/free na kazhdyj token.
+DISCIPLINA (popravka polzovatelja): zakachka DeepSeek pauzitsja na vremja LJUBYH zamerov vremeni
+(HDD-konkurencija zagrjaznjaet); regressija korektnosti (decode-check) ot zagruzki diska ne zavisit,
+no vsjo ravno pauzim dlja skorosti. Dead-code (step_mask_sent_ i dr.) NE udaljon: simvoly imejut
+3-6 vhozhdenij (write-only s mestami zapisi), ne trivialnoe udalenie - otdelnoj sessiej. Raspil
+monolita memex-fwd.cpp (10325 strok) - tozhe otdelnoj sessiej (shag 4, vysshij risk dlja grafa).
