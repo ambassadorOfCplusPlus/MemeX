@@ -161,3 +161,10 @@ PEREZAMER posle sha256: --expert-store 192 (ili auto --expert-store-reserve 9000
 Windows-evict (VirtualUnlock, defer_experts, drop_mmap_expert_pages) EST no inertna (dontneed_fragment
 no-op na Windows llama-mmap.cpp:551-554, index tolko __linux__ llama.cpp:5108) - NE nuzhna dlja etogo,
 tolko esli --ref/--decode-check faltit model-eksperty (togda Option A: VirtualUnlock + snjat __linux__ gate).
+
+## SHA256 DeepSeek (6 sent 22:00): SHARD 3 BYL BITYJ - perekachan
+Sverka: shard1 OK, shard2 OK (46,5 GB, 319s certutil), SHARD3 FAIL (got 3aacf308 vs exp a69102dd) -
+razmer sovpadal (40,96 GB), a soderzhimoe net => bitovaja porcha (verojatno ot smeshivanija aria2c+curl
+rano - raznyj rezjum na odnom fajle). CENNOST sha256 podtverzhdena: bez nejo zapustili by bituju model.
+Shard 3 udaljon i perekachivaetsja chisto odnim aria2c (bez smeshivanija). UROK [[network-hf-downloads]]:
+NIKOGDA ne meshat aria2c i curl na odnom fajle. Posle perekachki - pereсverit sha256 shard3.
