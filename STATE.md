@@ -7579,3 +7579,11 @@ VERDIKT PO SETI (reshajushchij test): LINK NASYSHCHEN NA ~100 Mbit. aria2c odin 
 to zhe), ne soedinenija (62 vs 31 ravno), ne svistok (kabel 1 Gbit v TUF). Tarif 200 Mbit NE dohodit:
 potolok vyshe TUF (WAN-aplink / kabel modem->TUF / modem / provisioning ISP). 11,5 MB/s = MAKSIMUM
 etogo linka. DeepSeek dokachaetsja ~1 ch. Proverit v TUF UI: WAN link speed 100 ili 1000.
+
+## DeepSeek-V4-Flash UD-IQ2_XXS DOKACHAN (6 sent 20:30): 90,9 GB, 3 sharda, razmery bajt-v-bajt s HF
+shard1 5 257 664 B, shard2 49 890 588 800 B, shard3 40 964 890 464 B - sovpali s X-Linked-Size HF.
+Skachan aria2c -x16 na 2 sharda po kabelju 1 Gbit (11,6 MB/s, potolok linka ~100 Mbit). sha256 -
+etalony v D:\DeepSeek-V4-Flash\expected_sha256.txt, skript verify_sha256.ps1 - PROGNAT POSLE zamerov
+(chtenie 90 GB s HDD ~15 min, ne smeshivat s tajmingom). Do proverki sha256 model NE zapuskat.
+D: svobodno posle: ~36 GB. Sledujushchee po DS4: probe realnyh bajt eksperta iz shardov 2-3,
+peresчёт §3 predictor_rnd (26% rezidentnosti -> 0,6-0,9 tok/s; REAP-45GB kak realnyj put).
