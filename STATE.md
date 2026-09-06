@@ -7491,3 +7491,22 @@ stoit nesupervizируemoj peresborki).
    TFTP+relayd v docs/router_openwrt_flash_plan.md - zhdjot remonta radiatora rukami. arslanbek na
    kanale 12. TP-Link RE - model neizvestna, ne proshivat.
 PK OSTAVLEN VKLJUCHENNYM (ne usypljon): DeepSeek-zakachka - reshenie polzovatelja, son otrezal by ego.
+
+## DeepSeek V4 Flash 2-bit: ZAKACHKA ZAPUSHCHENA (6 sent, po pros'be polzovatelja - predskazatel na njom)
+Kachaetsja unsloth UD-IQ2_XXS 90,9 GB (3 sharda) v D:\DeepSeek-V4-Flash\ (skript download.ps1,
+otsoedinjonnyj process, curl -C - vozobnovljaemyj, VPN po kabelju). Skorost 2,78 MB/s (VPS bystree
+ozhidaemogo), ETA ~9 chasov. Osvobozhdeno pod nego: udaleny mx8/mx9/mx10-xs (57 GB), D: bylo 127 GB.
+Zamok diska derzhitsja vsju zakachku - benchmarki poka nevozmozhny.
+
+PLAN EKSPERIMENTA S PREDSKAZATELEM (kogda skachaetsja):
+1. arch deepseek4 UZHE v vetke - sobrat/proverit zagruzku UD-IQ2_XXS (sverka decode-check).
+2. Zapusk cherez stock llama-server foreka (deepseek4 tam rabotaet iz korobki) ILI proverit,
+   berjot li nash memex-fwd (gate arch tolko qwen35moe/qwen3next - DS4 ne v gejte, nuzhen -ot).
+3. Static na kartu: MLA-vnimanie + routery + shared expert (proverit vlezaet li v 4 GB VRAM).
+4. ExpertStore: eksperty rezidentno skolko vlezet (pul ~52 GB v 2-bit? realno ~40% v 21 GB OZU).
+5. PREDSKAZATEL R1: perenesti priem s qwen na DS4 - snjat trassu marshrutizacii (top-6 iz 256),
+   obuchit korrekciju, zamerit hit-rate i ekonomiju promahov. VAZHNO: 6/256 razmazannee chem u
+   qwen (10/512 ili 512/top-10) - predskazatel mozhet byt slabee, no cena promaha ogromna (disk),
+   tak chto imenno zdes on nuzhnee vsego. Eto i est ideja polzovatelja.
+Chestno: potolok skorosti 0,3-1 tok/s ostajotsja (disk-bound), no eksperiment s predskazatelem
+validen - marshrutizacija ta zhe pri ljubom kvante.
