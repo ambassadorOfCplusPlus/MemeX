@@ -95,3 +95,36 @@ route_lab leave-one-out (eval=prompt_tech, prior=6 остальных), покр
 ВЫВОД: при C=330 + prior_v2 + весь overflow на SSD ожидаем ~125+94 ≈ 219 мс/ток (~4,6 tok/s steady,
 холод ~3,3) БЕЗ правок движка — против 2,62 сейчас. Это первый эксперимент под замком (warm-cap 13).
 system_sim константы поправлены: MISS_SSD_MS 3.616→3.4, SSD_READS_PER_S 380→280 (по замеру IQ4_XS).
+hidden_lab (prompt_2000, R1 self-trained, % ср при B=10/16/32; худш.слой в скобках):
+    k=1  85,1/96,6/99,6 (77/90/96)   k=2 81,2/93,9/99,0   k=4 76,4/90,0/97,7 (68/83/94)
+    k=8  71,0/84,8/95,1 (62/77/91)   k=12 67,4/81,3/93,0 (58/71/86)
+Спад ~4-5 п. на удвоение k при B=16; R1 ≈ R2 (свой линейный потолок) → R1 на пределе линейного.
+→ ДАЛЬНИЙ горизонт k=8 для SSD-уровня жизнеспособен (84,8% при B=16) — обучить train_r1.py --k 8
+  вместо аппроксимации hdd_lead. Перенос на чужой текст ~−4 п. (k=4: 90,2 self → 86,2 LOO).
+R1 по hidden (76-85% при B=10) ≫ межслойный без hidden (42%, route_lab) — hidden-state и есть сила.
+Оговорка: R1/R2 обучены на первой половине ЭТОГО документа (self); все дампы IQ3_XXS.
+system_sim (eval prompt_2000, prior=6 трейсов, C=330, k=4, token 130 мс, SSD 3,4 мс / 280 чт/с):
+    B=0:  sync/ток 4,85  холод 26,75  2-я половина 0,67  → 2,3 мс синхр. steady
+    B=8:  sync 2,79  холод 13,21  async 2,06  впустую 0,17  чтений 5,02
+    B=10: sync 2,10  холод  9,08  async 2,75  впустую 0,58  чтений 5,43
+    B=12: sync 1,61  холод  6,49  async 3,24  впустую 1,57  чтений 6,42
+    B=16: sync 1,19  холод  4,80  async 3,66  впустую 5,75  чтений 10,60   (бюджет SSD 36,4/ток везде)
+ВЫВОД: при C=330 + prior_v2 steady-state почти резидентен (0,67 промаха/ток = ~2 мс) → потолок
+~125 мс compute → **~7,5 tok/s** (vs 2,62 сейчас, ~3×). Боль = холодный старт (26,75/ток в первых 200);
+префетч B=10-12 режет его 3-4× при ≤1,6 впустую, полоса SSD не ограничивает (5-6 чтений из 36 доступных).
+Оптимум B=10-12; B=16 уже транжирит (5,75 впустую). Оговорки инструмента: холод при B>0 оптимистичен
+(R1 self-trained), цена предсказателя и задержка чтения не моделируются, перенос не мерен.
+→ Прогноз для замера под замком: arm без префетча ~130-220 мс (зависит от ~110 мс необъяснённых накладных
+в текущих 381), arm с префетчем B=10 — выигрыш на холодном старте.
+
+## BAG SIZING (najden pri bazlajne 6 sent ~21:15): auto_capacity PEREPODPISYVAET OZU
+Bazlajn iq4_floor -WarmCap 13 (--expert-store-auto) na 32-GB mashine tosnil: auto-C=330 (21,5 GiB
+rezidentno) + mmap modeli 41 GB + warm 13 GiB > 32 GB => "rezidentnye" eksperty vytesneny v pagefile,
+ExpertStore foltit ih s diska KAZHDYJ token (I/O 29 MB/s, CPU ~0, ~23 s/token = 0,04 tok/s). Zamer
+NEDEJSTVITELEN (pejdzhing, ne chistyj SSD-uroven). PRICHINA: --expert-store-reserve DEFAULT 2048 MiB -
+auto-C rezerviruet lish 2 GB pod OS, NE uchityvaet mmap-sled modeli (~10+ GB static+touched). FIKS
+DVIZHKA: auto_capacity dolzhen rezervirovat pod rezidentnye stranicy MODELI (ne tolko OS) - libo
+podnjat default reserve do ~8-10 GiB, libo vychest ocenku mmap modeli. Dlja zamera SEJCHAS: javnyj
+--expert-store C (256 = 16,7 GiB rezidentno, vlezaet s zapasom ~3 GB) ILI --expert-store-reserve 9000.
+Prognoz agenta "4,6 tok/s pri C=330" predpolagal chto rezident VLEZAET - na 32 GB s mmap modeli net;
+chestnyj potolok na 32 GB - C~256 (bolshe overflow na SSD warm-uroven). PEREZAMER s C=256.
