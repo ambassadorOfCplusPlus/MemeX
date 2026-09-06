@@ -7415,3 +7415,50 @@ OTKUDA "GEMMA 15+": eto RASCHJOTY, ne zamery. Vse proekcii svedeny tut, chtoby i
   odnim grafom ne sobrat.
 Vse rekordy snjaty s --no-ref; odinochnye progony na modeljah, ne vlezajushchih v OZU, NEDEJSTVITELNY
 (2,97 protiv 6,01 na odnoj komande - stranichnyj kesh), merit cheredovaniem.
+
+
+## Qwen3.6-35B-A3B IQ4_XS (17,7 GB): VLEZAET V OZU, 11,18 tok/s - x1,94 ot baseline (6 sent)
+
+Skachan UD-IQ4_XS 17,73 GB (razmer bajt-v-bajt s HF, GGUF-magija OK). GLAVNOE: 17,7 GB vlezaet v
+OZU s zapasom (svobodno 24,5), a Q6_K 29,3 GB NE vlezal i potomu daval tolko 5,76 (baseline llama-cli).
+
+Sverka: DECODE_CHECK agree 15/16, worst_l2 5,82% (odin near-miss v predelah f32-shuma) - dvizhok
+schitaet qwen35moe verno. Lesenca (--gen 48, -t 8, --no-ref, model progreta v page-cache):
+    CPU holodnyj (mmap fault s HDD, ~14 GB/token)   565 ms    1,77   <- NEDEJSTVITELNO (disk)
+    CPU progretyj                                    227 ms    4,4
+    statika na karte (--gpu-static-layers)           110,8 ms  9,0    <- x2 ot CPU
+    statika + ExpertStore (--expert-store-auto)       89,5 ms  11,18  <- 256/256 rezidentno, 100% popad.
+
+ExpertStore: 40 sloev x 256 ekspertov = 14,12 GiB rezidentno v privatnoj OZU (ekspert 1,391 MiB:
+gate iq3_s + up iq3_s + down iq4_xs), auto-C=256/256. Pervichnaja zaliv s HDD ~412 s (7 min,
+odnoraz, NE v cifre na token). Posle progreva disk ne trogaetsja - 89,5 ms ustanovivsheesja.
+--gpu-experts dlja qwen35moe OTKAZAN (tolko qwen3moe; da i eksperty 14 GB v 4 GB VRAM ne lezut) -
+pravilnyj instrument imenno ExpertStore v OZU. Sledujushchee: R4-repak (na Coder Next +25%),
+--resident tjuning, potolok. ChETYRE arhitektury teper gonjajutsja: qwen3moe/gemma4/qwen3next/qwen35moe.
+
+PIK 35B PODTVERZHDJON: R4-repak NE pomog - 100,70 ms/token (9,93 tok/s) protiv 89,48 bez repaka
+(11,18). Popadanija prosely 100->99,81%. Prichina: eksperty uzhe 256/256 rezidentny, repak lish
+dobavljaet nakladnye bez vyigrysha polosy (v otlichie ot Coder-Next, gde on ekonomil chtenie s HDD).
+ITOG Qwen3.6-35B IQ4_XS = 11,18 tok/s (static na karte + ExpertStore auto-C=256, --no-ref, -t 8).
+
+
+## DeepSeek V4 Flash: VERDIKT PO ZHELEZU (6 sent, agent-issledovanie) - 3-5 tok/s NEDOSTIZHIMY
+
+Chestnaja bajtovaja matematika na nashem zheleze (i3-10100F, 32 GB DDR4-2400 24,8 GB/s, RX6500XT
+4 GB, modeli na HDD 0,07 GB/s sluch.):
+- arch deepseek4 UZHE v nashej vetke (build_deepseek4.cpp, llama-dsv4.cpp tracked na HEAD cb09d5cc);
+  ne merzh, a gotovo. 4 selektor-opa (INDEXER_TOPK/MASK_TOPK/SINKHORN/MASK_TO_IDX) bez Vulkan -
+  ne blocker, idut na CPU. CSA+HCA = flash_attn+MLA+MoE, novyh jader net.
+- KVANTY (proverено na HF): NI ODIN 2-bit NE VLEZAET. Menshij IQ2 ~81 GB > 74 GB svobodno na D:.
+  Vlezaet TOLKO persadian IQ1_S-XL 57,3 GB (1,6-bit). unsloth UD-IQ1_S 82,5; UD-Q2_K_XL 96,8.
+- POTOLOK IQ1_S-XL: pul ekspertov 256x40x5,1 MB = ~52 GB, v OZU rezidentno ~21 GB (40%). Ostatok
+  s SSD (0,4 GB/s, 14 ms/ekspert) ili HDD (21 ms) - v 30-350x medlennee 2 ms/sloj vychislenij,
+  prefetch ne prjachet. REALNO 0,3-1 tok/s (prezhnjaja ocenka 2-4 byla optimistichna: trebovala
+  85-92% hit-rate, chto nuzhno ~44-48 GB rezidentno, a est 21). Otchjot "15 tok/s IQ2" byl na
+  NVIDIA DGX Spark 128 GB unified 273 GB/s - k nam ne perenositsja.
+- 3-5 tok/s trebujut 64 GB OZU ili NVMe - APGREJD ZHELEZA, ne soft. static-na-karte ne spasaet
+  (statika 4-6 GB > 4 GB VRAM, i ne kasaetsja 52 GB ekspertov). ExpertStore derzhit tolko 40%.
+VYVOD: kachat 57 GB IQ1_S-XL radi <1 tok/s - somnitelno (16 ch zakachki, zamok diska vsju noch).
+Reshenie za polzovatelem. Integracija (esli reshit): ~2-3 nedeli cherez stock llama-server
+(deepseek4 tam rabotaet) + ExpertStore cherez -ot exps=CPU + R1 na trasse DS4. Vulkan-port 4 opov
+ne stoit (DS4 edva v 4 GB VRAM). [[night-plan-2026-09-06]]
