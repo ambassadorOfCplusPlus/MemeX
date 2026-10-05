@@ -36,3 +36,7 @@ kaggle.json
 .playwright-mcp/
 github-data/
 regress/
+STATE.md
+*.log
+.claude/
+.playwright-mcp/
