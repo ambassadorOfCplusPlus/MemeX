@@ -1,38 +1,16 @@
-# Esli rabota oborvalas - ulozhit PK spat, chtoby on ne zhjog elektrichestvo vsju noch.
-#
-# CHTO SCHITAETSJA "rabota idjot": libo zhivjot process llama-memex-fwd (dolgij zamer mozhet
-# idti 40 minut bez edinogo obnovlenija fajla), libo heartbeat svezhee poroga. Poetomu porog
-# shchedryj: 90 minut polnoj tishiny. Zamer, kotoryj idjot, PK ne usypit.
-#
-# ESCAPE. Fajl D:\MemeX\results\.no-sleep otklyuchaet storozha nasovsem - polzovatel mozhet
-# sozdat ego rukoj i nichego ne sluchitsja. Eto vazhnee, chem tochnost: usypit mashinu poseredine
-# raboty huzhe, chem ne usypit vovse.
-param(
-    [int] $IdleMin  = 90,
-    [int] $CheckSec = 300
-)
-$HB   = 'D:\MemeX\results\.heartbeat'
-$STOP = 'D:\MemeX\results\.no-sleep'
-$LOG  = 'D:\MemeX\results\sleep_watchdog.log'
-function Say($m) {
-    $l = "[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $m
-    Add-Content -LiteralPath $LOG -Value $l -Encoding UTF8
-}
-Say "storozh zapushchen: porog tishiny $IdleMin min, proverka kazhdye $CheckSec s"
+$log = 'C:\Users\User11\Desktop\MemeX\bench\_sleep_watchdog.log'
+"WATCHDOG START $(Get-Date -F 'HH:mm:ss')" | Out-File $log
 while ($true) {
-    Start-Sleep -Seconds $CheckSec
-    if (Test-Path -LiteralPath $STOP) { Say 'najden .no-sleep - storozh vyhodit'; break }
-    $busy = @(Get-Process -Name 'llama-memex-fwd' -ErrorAction SilentlyContinue).Count -gt 0
-    if ($busy) { continue }
-    $age = 1e9
-    if (Test-Path -LiteralPath $HB) {
-        $t = [int64](Get-Content -LiteralPath $HB -TotalCount 1)
-        $age = ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - $t) / 60.0
-    }
-    if ($age -ge $IdleMin) {
-        Say ("tishina {0:N0} min i ni odnogo zamera - uklyudyvayu PK spat" -f $age)
-        Add-Type -AssemblyName System.Windows.Forms
-        [System.Windows.Forms.Application]::SetSuspendState('Suspend', $false, $false) | Out-Null
-        Say 'PK vernulsja iz sna - storozh prodolzhaet'
-    }
+  $now = Get-Date
+  # deadline 02:55; esli seichas >= 02:55 i < 05:00 (nochnoe okno) - spat
+  if ($now.Hour -eq 2 -and $now.Minute -ge 55) { break }
+  if ($now.Hour -ge 3 -and $now.Hour -lt 5) { break }
+  # stop-fajl otmenjaet son (esli polzovatel vernulsja)
+  if (Test-Path 'C:\Users\User11\Desktop\MemeX\bench\_no_sleep') { "otmena: _no_sleep" | Add-Content $log; exit }
+  Start-Sleep 60
 }
+"USYPLJAJU PK $(Get-Date -F 'HH:mm:ss')" | Add-Content $log
+# final: ubit tjazhjolye progony chtoby ne meshali
+Get-Process llama-memex-fwd -EA SilentlyContinue | Stop-Process -Force -EA SilentlyContinue
+Start-Sleep 3
+rundll32.exe powrprof.dll,SetSuspendState 0,1,0

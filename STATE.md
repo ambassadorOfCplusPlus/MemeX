@@ -1,6 +1,144 @@
 # Где мы стоим
 
-Обновлено 26 августа 2026. Всё, что здесь есть, — измерено; предположения помечены как таковые.
+Обновлено 11 сентября 2026. Всё, что здесь есть, — измерено; предположения помечены как таковые.
+
+## 13 сентября 2026 — Phase 2 КОНСОЛИДАЦИЯ ЗАВЕРШЕНА (6 фич в memex)
+
+- **`memex` = 584bcd48**: fast-forward на консолидированную ветку. Все 6 победных фич влиты и заверены (build + регрессия qwen3moe/gemma4 16/16 после каждого мержа + финальная): (1) dense-full-gpu `--gpu-full`, (2) ds4-static-gpu (23 конфликта разрешены вручную + кросс-валидированы независимым ort-мержем), (3) chat+tool+conditional-suspend (+фикс: удалён устаревший дубль --chat-диспетча со старой 17-арг сигнатурой run_chat), (4) sampling-dry (DRY+freq/presence, default-OFF), (5) vk-cpu-fallback, (6) qwen35-moat-overlap. Метод для #3-6 — cherry-pick дельты фичи (`branch_baseline..tip`), а не merge типа-ветки: baseline-снапшоты веток разного возраста давали лавину ложных конфликтов (48 при merge → 1 при cherry-pick). `main`(апстрим 8337e4cd) и `wip/memex-baseline-2026-09-13`(15cc44ad) целы; consolidation-ветка + wt_consol worktree сохранены. **Урок процесса:** два ранних агента консолидации работали параллельно (их «completed»-уведомления вводили в заблуждение — реально ещё жили); оба сами встали, вреда нет (git сериализовал индекс), но это дорого по токенам — впредь консолидацию вести одним писателем. **Урок сборки:** правка ggml-vulkan.cpp через инкрементальный билд дала stale-ABI (0xC0000139 ENTRYPOINT_NOT_FOUND на старте) — лечится чистой пересборкой build-wt.
+- Следующее: слить в прод/переименовать (Skiff, скрипт готов), Option-B фичи, heavy-hitter KV дизайн.
+- **CPU power-limit A/B ЗАМЕРЕН — снятие лимита цп в BIOS инференс НЕ ускоряет (bandwidth-bound).** phi3 CPU (build-bt2022, `--repack-only=all --no-ref`, устойчивый --gen 768, 3 повтора): медиана **10.56 / среднее 10.86 tok/s** vs база 9 сент **11.01** = ФЛЭТ (в пределах шума 9.6%). При этом турбо реально держится: `PercentProcessorPerformance` стабильно **113% = ~4.07 ГГц all-core** под 100% нагрузкой (не падает к базе 3.6 после Tau) — лимит длительности снят и работает. Но декод LLM на CPU **упирается в полосу ОЗУ (DDR4-2666 ~24 ГБ/с), не в частоту** — ядра ждут RAM, поэтому +13% частоты дают ~0 к tok/s. Рычаг = полоса ОЗУ (на H410+i3 non-K залочена 2666). Правка не вредна, может помочь компьют-баунд prefill/сборкам, но не decode. Подтверждает тезис: CPU bandwidth-bound → выигрыш только на GPU (VRAM 144 ГБ/с). Лог: bench/CPU_POWERLIMIT_AB_2026-09-13.log.
+
+## 13 сентября 2026 — gemma-4-e2b/e4b уже поддержаны; conditional-suspend готов
+
+- **gemma-4-e2b/e4b — ПОРТ НЕ НУЖЕН, уже работают (ЗАМЕРЕНО).** Три GGUF в `D:\smartstock\models\` (`gemma-4-e2b-it-qat` 2.44ГБ, `gemma-4-e4b-it-qat` 3.93ГБ, `gemma-4-E4B-it-UD-Q2_K_XL` 3.50ГБ) — это Gemma-3n E2B/E4B, переупакованные под нативную арх-строку движка **`gemma4`** (НЕ отдельный «gemma3n»). Dense (n_expert=0 → MoE-ветка `build_gemma4()` не срабатывает), с PLE (`embedding_length_per_layer_input=256`, тензоры `per_layer_*`/`inp_gate`/`proj`/`post_norm`/`layer_output_scale`), dual-RoPE (`1e6`/`1e4`), dual-SWA KV (`key_length 512`/`swa 256`, окно 512, паттерн 5-local:1-global), QK-norm, logit-softcap 30. **altup/laurel НЕТ ни в весах, ни в коде** — конвертер их выкинул, движок ровно под эти файлы и писался. Существующий `build_gemma4()` (dense-ветка, `src/graphs/build_gemma4.cpp:954-1137`) + загрузчик (`llama-load-tensors.cpp:2222-2298`) покрывают всё. **Контрольная загрузка e2b (CPU, greedy, под локом):** чистая загрузка (541 тензор), СВЯЗНЫЙ вывод (Rayleigh scattering, чистый `[end of text]`), exit 0, decode 15.4 tok/s. Порт/патч не требуется.
+- **conditional-suspend ГОТОВ (ветка agent/chat-tooluse, `55ea1c9d`).** Suspend/resume теперь условный от места весов: **GPU-резидентная модель (`--gpu-full`) на тяжёлый инструмент НЕ выгружается** (reload 0 мс — VRAM-веса не конфликтуют с RAM/CPU-инструментом; граф/кэш нетронуты, генерация продолжается точно с места). RAM/CPU-путь без изменений — suspend (checkpoint + `llama_free_model`, освобождено 3023.6 МБ) → reload 2564 мс. Сделано автоматическим, т.к. GPU-случай ещё и единственно КОРРЕКТНЫЙ (`do_resume` не восстановит host→device-twin FullGpu). Побочно оживлён мёртвый путь `--gpu-full --chat` (падал на `GET_ROWS q4_K` эмбеддинга — теперь `main` отдаёт готовый device-`am`). Регрессия qwen3moe/gemma4 16/16.
+- **sing-box: Яндекс мимо VPN** (не движок) — route+DNS исключение для `*.yandex.*`/`ya.ru`/`yastatic.net`/`yadi.sk`/`yandexcloud.net` → `direct`/`bootstrap-dns`, в рабочем и шаблонном конфиге, JSON валиден.
+
+## 11 сентября 2026 — GPU-победы ЗАМЕРЕНЫ на живой карте; видюха отваливалась (драйвер)
+
+- **GPU-инцидент и фикс**: RX 6500 XT отвалилась (Code 31 CM_PROB_FAILED_ADD — битый драйвер), 5× аварийных ребутов Kernel-Power 41 за 3 дня (07/09, 09/09×2, 10/09×2). НЕ термо (макс 48-50°C под нагрузкой). Фикс: чистая переустановка драйвера AMD → **26.8.1**. После фикса: **4 мин сустейн-стресса без краша** — карта здорова, корень был в драйвере.
+- **phi3-full-gpu ЗАМЕРЕН на живой карте: 46.24 tok/s** (gen512) vs CPU-эталон 8.68 = **×5.3**. Было 11 (CPU, худшая-vs-сток модель) → теперь **крушит сток (30-40)**. Крупнейший одиночный win, подтверждён.
+- **qwen3moe пик подтверждён: 19.46** (gen512, 3 сустейн-прогона 18.94→19.26→19.46), > сток 12-17. VRAM 3.7ГБ, спилла нет.
+- **`--resident >0` на Vulkan ПАДАЕТ** (exit 1 — repack `_R*` формы AMD/Vulkan не поддерживает). Потому пик-конфиг стоит на `--resident 0`; «забить VRAM резидентными экспертами» на этой карте невозможно → 19.46 = потолок этого рычага (ограничение бэкенда).
+- **SSD QD-проба (NO_BUFFERING)**: QD=1 361 МБ/с (20.4мс/чтение), **QD=6 454 МБ/с (16.2мс)** — +26% lossless, после QD=6 плато. Рычаг для disk-reorder.
+- **MoBE = NO-GO** (замерено): IQ2 уже съел межэкспертную избыточность (‖W_i−W_shared‖/‖W_i‖=1.15-1.31, shared-anchor не работает; наивный MoBE ошибка выхода 98-99%). Barely-lossy путь закрыт.
+- **★ deepseek статика-на-GPU — ПОЧИНЕНА, но выигрыш МАЛЫЙ (+11%, не ×2.2).** Итог (ветка agent/ds4-static-gpu, `da49705f`): `--gpu-static-attn 18` даёт **0.66 tok/s vs 0.59 CPU = +11%**, СВЯЗНЫЙ вывод, 0 FAIL, 18/43 на карте, регрессия 16/16 — реально на GPU, lossless. **Корень бага (был): `GGML_MAX_CONTEXTS=64`** — каждый crossing-граф аллоцировал 2 ggml-контекста без освобождения → 6N > 64 при ≥2 crossings → ggml_init=NULL → липкий fail → memset(0) → мусор (повтор BOS). Фикс: общие 2 контекста (6N→2). **«1.41/×2.2» было ФЕЙКОМ** — баг пропускал 13/18 слоёв через zero-memset (быстро, но мусор); 1.4 и связность несовместимы. Bottleneck теперь = BAR-readback (33280 float/слой). Апсайд (в работе): readback-fold 33280→4096 + KV-резидентность + overlap GPU-shexp∥CPU-routed. Урок: НИКОГДА не звать tok/s без проверки текста. Компут-пол был забит стримингом 7ГБ статики из RAM (15 ГБ/с) → 18 слоёв теперь с VRAM (144 ГБ/с). Win закоммичен в worktree, интеграция в main = аккуратный 3-way merge (ветки разошлись: main имеет phi3+ds4-opt) — отложено, не форсить.
+- **deepseek preset+cost-tiered-штраф (λ_ssd) — ЗАМЕРЕНО, МЁРТВО.** Доменный пресет (83.5% hit) ХУЖЕ динамич-recency (89.1%) — домены не концентрируются на held-out (Jaccard код↔проза 26%). Штраф λ_ssd торгует качеством сразу: λ=0.02 ломает вывод на 25 токене, λ=0.3 = +27% скорости и мусор; near-lossless λ, режущего промахи, НЕТ. И стор при 89% hit = 0.41 tok/s — МЕДЛЕННЕЕ mmap 0.62 (per-miss 49мс + оверхед). Вся линия стор/пресет/штраф проигрывает mmap (как disk-reorder, MoBE). Deepseek I/O: mmap лучший; реальный win = mmap+static-attn (компут), НЕ I/O. Последний I/O-шанс — MLP-предиктор (обучается).
+- **qwen35 overlap ЗАМЕРЕН: 8.51 → 8.86 (+4.0%)** (ветка wt_moat b603ef2b, `--gpu-experts --resident 0`, регрессия 3/3 чиста). Скромнее оценки +6-9%, lossless-ish (GPU f32, не bit-exact). Win в worktree, merge в main отложен.
+- **⚠️ C:/models/qwen/Qwen3-Coder-Next-UD-IQ3_XXS.gguf БИТЫЙ** (7.75ГБ, тензор blk.12 за границей файла — неполная закачка). Рабочая копия D:/models/Qwen3-Coder-Next/ (27ГБ). Перекачать C: или удалить.
+- **Агент-программа deepseek (lossless, остальное)**: predictor+доменные пресеты+cost-tiered штраф λ_ssd (режет I/O-промахи — СТАКАЕТСЯ со статикой-GPU); qwen35 overlap (закоммичен b603ef2b, ждёт A/B); чат+tool+suspend/resume (production). ❌ disk-reorder (нет сик-штрафа на 7МиБ) и ❌ MoBE (IQ2 без избыточности) — мёртвы, замерено. Потолок связки статика-GPU+предиктор ~2-3 tok/s lossless; 5 = только железо.
+- **Стратегия**: развивать движок = финализировать fit-model GPU-победы (бьют сток) + production-слой; deepseek-5 hardware-bound (SSD 0.36 ГБ/с + компут-пол 1.0 tok/s). 6 ручных арх-графов = налог поддержки, при серьёзности — обобщить на ggml_backend_sched (откроет CUDA).
+
+## 10 сентября 2026 — deepseek потолок ЗАМЕРЕН, phi3-full-gpu собран, SOTA-оценка
+
+- **deepseek4 IQ2 config-A ЗАМЕРЕН**: `--mmap-touch-hash` (холодный кэш) **0.6246** vs plain mmap (тёплый) **0.6139** — прирост в пределах шума. Прогноз 0.7-0.85 НЕ сбылся. Диагностика: touch-узлы просят 1.96 ГиБ/токен у ОС, ~933мс/токен — `PrefetchVirtualMemory` батчит page-faults, но байты всё равно идут с SSD 0.46 ГБ/с. **Узкое место = bandwidth, НЕ page-faults.** Стена 0.62 подтверждена 8-м замером.
+- **Lossless-компрессия IQ2 весов = МЁРТВА (замерено)**: zstd -1/-9 и xz -6 на реальном куске экспертов дают файл БОЛЬШЕ оригинала (314.58М vs 314.57М). Квантование = уже энтропийный предел.
+- **SP-MoE (спек+префетч) МЁРТВ на этом кванте**: скан всех 3 шардов — 1328 тензоров, MTP/nextn-голов НЕТ (Unsloth выкинул), совместимого драфта нет (vocab 129280). n-gram acceptance ~0.3 → проигрывает.
+- **ds4-opt флаги интегрированы** (ветка ds4-ssd-opt): `--expert-store-miss-batch` (OVERLAPPED batched reads), `--mmap-touch`/`--mmap-touch-hash` (PrefetchVirtualMemory), `--prefetch-hash` (3 hash-слоя deepseek → эксперты точно известны, 0 waste), `--gpu-static` голова deepseek. Собрано, регрессия чистая, bit-exact default-off. Нейтральны на этом железе (потолок 0.62), но корректны.
+- **phi3-full-gpu СОБРАН** (ветка phi3-full-gpu-impl, merge чист): `--gpu-full` (memex::FullGpu) — все веса+KV+граф на Vulkan, одно пересечение/токен. Решён блокер: Vulkan get_rows без K-quant кернела → эмбеддинг на хосте (dequant в float, bit-identical). Модель Phi-3-mini-4k Q4 перекачана (снесли при чистке C:). Замер `--gpu-full` (цель 11→≥30, ~3×) — pending (машина занята qwen-агентом). Не bit-exact vs CPU (аккумуляция девайса) — проверка `--decode-check`.
+- **kv-quant** (ветка kv-quant): честно — 2-бит KIVI НЕвыразим в ggml (нет 2-бит block-32 типа; per-channel = транспонированный K, mul_mat не читает). Fallback K per-token q8_0/q4_1/q4_0 (−22%/−36% KV), +4-6% на 4k. Премиса слабая для gpt-oss (KV крошечный)/deepseek (MLA сжат) — платит на qwen3moe/gemma4 при ≥8k ctx. НЕ интегрирован.
+- **Opus SOTA-оценка**: моат = CPU/GPU overlap-планировщик (реально впереди, никто не считает резидентных на GPU параллельно с CPU в одном слое). Позади SOTA: предсказатель (ProMoE/SP-MoE 88-90%), HDD-тир (тупик). Рекомендации: SP-MoE (мёртв тут), MTP-головы (нет в кванте), KIVI KV. 6 ручных арх-графов = стратег. налог; overlap-планировщик = единственный upstream-достойный вклад.
+- **В работе (агенты)**: (1) research-агент Opus — ищет в инете методы deepseek→5 tok/s + реализует топ; (2) qwen35next overlap-рычаг +6-9% (незакрытый gap: карта простаивает на routed-экспертах, ResidentSet не учитывает shared-эксперта).
+
+## 9 сентября 2026 — ПОЛНЫЙ ЗАМЕР ПИКОВ (правильные конфиги, все оптимизации)
+
+| Модель | Пик ток/с | Конфиг | vs сток llama.cpp |
+|---|---|---|---|
+| qwen3moe-mx1 30B | **18.89** | карта: `--gpu-static-layers --gpu-experts --resident 0 --resident-period 32 --no-repack --no-ref`, gen192 | ≥ (сток 12-17) |
+| gemma4 26B | **13.73** | карта: `--gpu-static --gpu-static-dense --gpu-static-layers --no-repack --no-ref` | ≈ (сток 10-14) |
+| qwen35next (Qwen3.6-35B) | **11.09** | карта: `--gpu-static-layers --no-repack --no-ref` | — |
+| phi3-mini 2.4GB | **11.01** | CPU `--repack-only=all` | НИЖЕ (сток 30-40 через VRAM!) |
+| gpt-oss-20b MXFP4 | **9.88** | R8-репак + `--gpu-static` (голова-на-карту, head-split 2 куска) | В СТОКЕ (8-15) ✓ |
+| gpt-oss прогресс | base 6.83 → R8 7.43 → R8+голова **9.88** | внимание-на-карту (ветка) → ~11-14 | — |
+| deepseek4-90B nonfit | **0.067** (big-warm РЕГРЕССИЯ) / 0.36 (mmap) | — | диск-bound в обоих |
+
+- ВАЖНО: прежний qwen3moe замер 10.04 был НЕВЕРНЫМ конфигом (`--zoned` = чистый CPU, не карта). Пик 18.89.
+- **Глубокие оптимизации** (build+регрессия 16/16+аудит 0 находок): qwen3moe up_gate фьюз, gpt-oss head-split, deepseek identity-предсказ.
+- **deepseek big-warm ПРОВАЛ**: 58ГБ warm сожрал RAM → резидент 27→3 → SSD-промахи (0.46 ГБ/с) доминируют. Путь: max RAM-резидент + вероятностный динамич тиринг + предсказ. Warm удалён.
+- **Стратегия (Fable-агент)**: сток берёт 80-90% на fit-MoE, БЬЁТ нас на phi3(×3)/gpt-oss(×2) — кладёт мелкие на карту. Наш моат: CPU/GPU overlap +15-30% + nonfit-стор. Блюпринты: docs/hardware_portability, phi3_full_gpu, production_audit (9 сент).
+- **Продакшен**: `--chat`→run_chat подключён (был мёртвый код) + прод-фиксы (stderr/fflush/guard). build 13:07 годна.
+
+## Ночь 7 сентября 2026 — прогресс (проверено)
+
+- **Мультишард-стор для deepseek4** (3 шарда gguf). `expert_store`: пошардовый индекс на
+  каждый тензор (`shard_gate/up/down`), хендл NO_BUFFERING на каждый шард (граф-поток +
+  I/O-поток), `open_direct` перечисляет шарды по шаблону `-NNNNN-of-MMMMM`. Чтение
+  верифицировано: `ESTORE_VERIFY bad 0`, 3 яруса (ОЗУ 61 рез./слой + SSD warm 79/слой 23.8 ГиБ
+  + HDD) читают из всех 3 шардов. Регрессия 16/16 (qwen3moe/gemma4/qwen3next) держится.
+- **deepseek4 со стором давал МУСОР — корень найден и починен.** Стор юзался на prefill
+  (n_tokens>1), где промахов на слой больше 16 спар-слотов → незаполняемые слоты → мусор с
+  шага 0. Фикс: стор ТОЛЬКО на декоде (es=nullptr на prefill, как qwen35, «ловушка 7.7»).
+  Проверено: `is Paris. The capital of England is` — идентично эталону без стора.
+- **Маршрут-прайминг для deepseek4** (предсказатель): `build_deepseek4_step` теперь отдаёт
+  `g->sel_ids` на prefill → харнесс сеет счётчики частот (`observe_prefill`) и заливает
+  резидентный набор реально частыми экспертами (`prime`) ДО генерации. [замер скорости — ниже]
+- **Phi-4 (arch `phi3`)** внедрён в наш движок: `Phi3Weights`/`collect_phi3`/`build_phi3_step`
+  (слитый attn_qkv → Q/K/V вьюхами, слитый ffn_up → SwiGLU silu(gate)×up), реестр/диспетчер.
+  Порядок split подтверждён по исходнику llama.cpp. **ПРОВЕРЕНО на Phi-3-mini-4k Q4 (тот же
+  арх): вывод `France is Paris. That's correct! Paris is indeed the capital` — когерентно,
+  10.04 ток/с (плотный 3.8B на CPU).** Плотные архи (n_expert=0) больше не отвергаются guard'ом.
+
+### Таблица замеров (ночь 7 сент, наш движок memex-fwd)
+| модель | арх | конфиг | ток/с | статус |
+|---|---|---|---|---|
+| Phi-3-mini 3.8B Q4 | phi3 | плотный, CPU | **10.04** | новый арх, когерентно (Paris) |
+| **gpt-oss-20b** | gpt-oss | MoE 32/4, CPU тёплый | **5.7** | НОВЫЙ арх, когерентно ✓; пик уже на t=6, упёрт в полосу ОЗУ (1.67 был холодный прогон) |
+| deepseek4 90GB IQ2 | deepseek4 | mmap (без стора) | 0.36 | корректно (Paris/London) |
+| deepseek4 90GB IQ2 | deepseek4 | стор+прайминг, без warm | 0.056 | корректно, 74.5% попаданий, потолок HDD |
+| deepseek4 90GB IQ2 | deepseek4 | стор+warm+прайминг | 0.044 | **93.8% попаданий** (лучшее), но HDD-промахи 10/ток → медленнее mmap; стор корректен, потолок HDD |
+
+Потолок deepseek4 — полоса HDD (90GB IQ2, эксперты не влезают в 32GB ОЗУ): стор корректен,
+но на HDD не обгоняет mmap значимо. Рычаг = SSD/NVMe под модель или 64GB ОЗУ, не софт.
+
+- **gpt-oss (arch `gpt-oss`, OPENAI_MOE)** внедрён в наш движок: `GptossWeights`/`collect_gptoss`/
+  `build_gptoss_step` — MoE 32/4 с per-expert биасами (`ggml_add_id`), обучаемыми attn_sinks
+  (`ggml_soft_max_add_sinks`), SwiGLU-OAI (`ggml_swiglu_oai` clamp), gating SOFTMAX_WEIGHT
+  (top-k по логитам → softmax выбранных, без ренорма), биасы q/k/v/o. Порт из `src/graphs/
+  build_openai.cpp` + `llm_build_moe_ffn`. **КОМПИЛИТСЯ, дерево годно, регрессия 16/16.**
+  SWA пропущено в v1 (окно 128 не влияет на контекст < 128 → корректно для короткого теста;
+  TODO для длинного). Рантайм-тест — по готовности докачки unsloth gpt-oss-20b F16 (~12.85 ГБ,
+  качается на D:). Чертёж: docs/gptoss_port_blueprint_2026-09-07.md.
+- **llama4 (~90 ГБ)** — форк знает арх (LLM_ARCH_LLAMA4), но **скачать нечем** (D: 16 ГБ своб.,
+  меньшая llama4 Scout Q2 ~40 ГБ). Отложено: диск/сеть, не софт. Внедрять как gpt-oss (граф).
+- **Ревью кода агентом**: verified clean (shard-раскладка, роутинг, деструктор, phi3-сплиты,
+  deepseek4-guard). 1 находка (робастность): `fill_slot` коммитил слот даже при сбое чтения
+  (битый шард → молча мусор) — **починено**: при сбое слот не коммитится (остаётся промахом),
+  сообщения по счётчику, не по глобальному флагу.
+
+### ИТОГОВЫЙ ЗАМЕР со всеми оптимизациями (8 сент, --gen 32, тёплый, лучший конфиг)
+| модель | арх | конфиг | ток/с | заметка |
+|---|---|---|---|---|
+| qwen3moe-mx1 30B | qwen3moe | card (gpu-static полный) | **16.23** | тёплый, голова на карте |
+| gemma4 26B | gemma4 | card | **15.11** | > прежний рекорд 13.95 |
+| phi3-mini 3.8B | phi3 | repack-all | **12.63** | > дефолт 10.04 (+26%) |
+| gpt-oss-20b | gpt-oss | no-repack (CPU) | ~5.7 тёплый | голова на карту НЕ влезла (1104>1024МиБ буфер) |
+| qwen3next 80B | qwen35moe | card | ~5-6 | 80ГБ не кешируется, I/O-переменная |
+| deepseek4 90GB | deepseek4 | mmap | ~0.36 тёплый / 0.044 стор | потолок HDD 0.07 ГБ/с |
+Оговорка: в едином прогоне гиганты (80/90ГБ) вымывают page-cache → gpt-oss/dsv4/qwen3next там
+замерились холодными (0.78/0.12/3.82); числа выше — изолированные тёплые/лучшие конфиги.
+Все правки: РЕГРЕССИЯ 16/16 + АУДИТ ЧИСТО (docs/optimization_agents_2026-09-08.md).
+
+### GPU-static оффлоад — подтверждён как доминирующий рычаг (8 сент, A/B замер)
+Быстрый A/B (16 токенов, generic флаги — НЕ пик-конфиг, потому абсолютные числа НИЖЕ записанных
+пиков; короткий прогон занижает): CPU-only vs `--gpu-static --gpu-static-dense --gpu-static-layers`:
+- gemma4: CPU 7.75 → card **14.67** (пик записан 13.95 — уже был с картой)
+- qwen3moe(mx1): CPU 14.76 → card 15.91 (пик 19.80 — пик-конфиг с зонным KV/репаком выше)
+- qwen3next: CPU **1.93** → card **5.19** (пик 6.15; +169% от CPU показывает силу рычага на крупной)
+ВЫВОД: карта = реальный большой рычаг (CPU-only сильно медленнее), но она УЖЕ входила в пики;
+мои быстрые прогоны их занизили. Чтобы воспроизвести истинные пики — гнать пик-конфиг дольше.
+Дорожная карта: docs/optimization_agents_2026-09-08.md.
+
+### Тулчейн + Vulkan attn_sinks (8 сент, день)
+- **VS 2026 снесена → сборка на Build Tools 2022** (MSVC 14.44, D:\dev\BuildTools). Канон —
+  `build-bt2022` (генератор «VS 17 2022», SDK 10.0.22621.0 после сноса 26100 с VS). Регрессия 16/16.
+  `build_safe.ps1` дефолт-Dir и `regress_tokens.ps1` EXE → build-bt2022.
+- **Vulkan attn_sinks ПОРТИРОВАН в наш движок** (ggml-vulkan) из upstream PR #15091: soft_max
+  теперь 4-буферный (X/mask/**sinks**/dst), push-константа `has_sinks`, шейдер читает `data_c[i02]`
+  в max+знаменатель. Регрессия 16/16 (общий soft_max не сломан). Это снимает блокер gpt-oss-на-карте.
+  ОСТАЛОСЬ: gpu_static-путь в build_gptoss_step (роутинг статики/внимания на карту), чтобы sinks-путь
+  заработал вживую и gpt-oss поехал вниманием на GPU (потенциал 5.7 → ~8 ток/с).
+
+Ниже — измеренный фронт до этой ночи (актуально по скорости/памяти на fit-моделях).
 
 ## Измеренный фронт на Qwen3-Coder-30B-A3B
 
@@ -7587,3 +7725,137 @@ etalony v D:\DeepSeek-V4-Flash\expected_sha256.txt, skript verify_sha256.ps1 - P
 (chtenie 90 GB s HDD ~15 min, ne smeshivat s tajmingom). Do proverki sha256 model NE zapuskat.
 D: svobodno posle: ~36 GB. Sledujushchee po DS4: probe realnyh bajt eksperta iz shardov 2-3,
 peresчёт §3 predictor_rnd (26% rezidentnosti -> 0,6-0,9 tok/s; REAP-45GB kak realnyj put).
+
+## 2026-09-07 §2 NO-COPY POBEDA (Coder-Next IQ4_XS)
+Chistyj mmap BEZ --expert-store + --gpu-static (statika na karte), LLAMA_MMAP_PREFETCH=0.
+Progrev + 2 steady (kazhdyj otdelnyj process, page-cache perezhivaet):
+- PROGREV holodnyj: our 1.30 tok/s (fault ekspertov s HDD, 49s/64tok)
+- STEADY1: STATIC_AB our_tok_s 7.7591 ref_tok_s 5.6661 (129 ms/tok)
+- STEADY2: our 7.7041 ref 5.7068 (ustojchivo)
+=> **7,7 tok/s protiv 2,62 s privatnym buferom ExpertStore = 3x bystree, NOL koda, osvobozhdaet 21 GiB.**
+our(karta) > ref(CPU) => statika na karte +35% poverh page-cache. Privatnyj bufer byl PROBLEMOJ
+(vtoraja kopija -> pejdzhing), a ne resheniem. No-copy = pravilnaja arhitektura, konfig dlja prod.
+Predskazatel (--mmap-resident-predict) nuzhen tolko pri dlinnyh generacijah (bolshe unikalnyh
+ekspertov chem vlezaet); na HDD prefetch v tjoplom = minus, poetomu poka no-copy 7,7 - final.
+Raner: bench/run_nocopy_baseline.ps1 (ili pryamo iz bash, PS-obertka padala na stderr binaria).
+
+## 2026-09-07 deepseek4 VERDIKT (agent-razvedka)
+- Etalonnyj put forka UZHE polnostju podderzhivaet deepseek4: src/llama-dsv4.cpp (1799 str) +
+  src/graphs/build_deepseek4.cpp (1684 str), enum LLM_ARCH_DEEPSEEK4 (llama-arch.h:54), 25+ tochek
+  v llama.cpp, kastomnye ggml-ops (HADAMARD/HC_PRE/DS4_COMP/INDEXER_TOPK) s CPU-jadrami. GGUF-kljuchi
+  sovpadajut (deepseek4.attention.indexer.*, compress_ratios). => llama-cli iz foka zagruzit i
+  zapustit DeepSeek-V4-Flash BEZ novogo koda (kak Mixtral). Vulkan etih 6 ops ne umeet -> sched
+  avtomaticheski na CPU (standartnoe povedenie llama.cpp).
+- Nash bystryj put (memex-fwd) deepseek4 za noch NEREALNO: pereimplementirovat ~3500 str MLA+DSA+
+  3-jarusnyj kesh, chto lomaet dopushchenija harnessa (edinaja K==V shirina - proverka 645-650;
+  odin kesh; net ggml_backend_sched - ruchnaja dispatchizacija). Mnogonochnyj proekt.
+- DEJSTVIE: zapustit DeepSeek cherez llama-cli (etalon), poluchit tokeny, zamerit (chestno <1-2 tok/s,
+  90GB IQ2 na HDD 0.07 GB/s). Fast-put deepseek4 - otlozhen, opisan kak "port llama-dsv4+build_deepseek4".
+
+## 2026-09-07 arch llama/Mixtral: VNEDRENA i PROVERENA
+7 pravok (registry ArchId::LLAMA, arch_llama bool, collect require_qk_norm, build_step qk-norm guard
+2252/2256, arch_llama_model konstruktor, dispatch collect+ArchModel). Sborka godna. Revju-agent:
+багov >=80% net. REGRESSIJA: qwen3moe_mx1/gemma4/qwen3next vse 16/16 sovpali s golden - starye arh
+NE slomany. Dalee: Mixtral --decode-check (korrektnost), potom vkljuchit --gen dlja llama (gejt 6806)
++ --gpu-static (7290, can_gstat) dlja zamera. Mixtral kachaetsja (retry).
+
+## 2026-09-07 Mixtral --decode-check: 0/16 - CHISLOVAJA OSHIBKA v fast-puti
+Nash build_step (arh llama) vydajot SVJAZNYJ tekst ("A mixture-of-experts (MoE) model"), no
+NE sovpadajushchij s etalonom: agree 0/16, worst L2 207% na shage 13. Rashozhdenie s tokena 0 =>
+oshibka v jadre (ne nakoplenie). RoPE verojatno NE prichina (ggml_rope_multi mode=0 NORM dajot
+NORM-povorot; qwen3moe s tem zhe ggml_rope_multi NEOX sovpadaet). Kandidaty: attention-scale,
+MoE-gejting (softmax->topk->renorm porjadok), pozicii/maska. Etalonnyj put (build_llama.cpp)
+KORREKTEN (decode-check ref-storona otrabotala). Model MOZHET bezhat pravilno cherez llama-cli;
+fast-put trebuet otladki. Dispatched debug-agent na pooperacionnoe sravnenie.
+Fajl: examples/memex-fwd/memex-fwd.cpp build_step ~2123-2562 vs src/graphs/build_llama.cpp.
+
+## 2026-09-07 Mixtral fix#1 (residual) NEVEREN - otkachen
+Gipoteza debug-agenta (skladyvat ffn-normirovannyj vmesto ffn_inp) PROVERENA progonom: stalo HUZHE -
+2/16 no MUSOR ("geldig geldig"), worst L2 337%. Do fixa: SVJAZNYJ tekst 0/16. Znachit ostatok
+moe+ffn_inp BYL VEREN (svjaznost = validnyj prohod), a etalon NE skladyvaet normirovannyj (inache
+sam vydaval by musor). Otkachen k ggml_add(moe, ffn_inp). Nastojashchij bag - NE ostatok. Novye
+podozrevaemye: RoPE (ggml_rope_multi NORM vs ggml_rope_ext) ili router-gejting (renorm top-k).
+Urok: testirovat kazhdyj fix decode-check, ne verit diagnozu na slovo.
+
+## 2026-09-07 Mixtral RABOTAET na nashem dvizhke
+llama-cli (etalon build_llama forka) na Mixtral = MUSOR ("хЛЗa┼Вo;toac0 irab") - bag ostatka
+(moe+normirovannyj) v FORKE, ne u nas. Nash build_step (moe+ffn_inp) = SVJAZNYJ vyvod = KORREKTEN.
+decode-check nevaliden (etalon sloman). Vkljuchil --gen dlja llama (gejt 6806 +!arch_llama).
+Zamer: Mixtral --gen na CPU (static=0) = **STATIC_AB our_tok_s 3.96, 252 ms/tok = ~4 tok/s** (85%
+model-budzheta 6.27 GB/tok pri 24.8 GB/s). So --gpu-static budet bystree. Fork NE pravim (reshenie
+polzovatelja: razvivaem nash dvizhok). Dalee: deepseek4 v nash dvizhok (mandat), stadijno.
+
+## 2026-09-07 Mixtral --gpu-static (golova na karte): +2% (model-bound)
+Vkljuchil --gpu-static dlja llama (gejt 7290 +!arch_llama, arch_llama_model can_gstat=true).
+STATIC_AB our_tok_s 4.05 (golova na karte) vs 3.96 CPU = +2%. Golova NE uzkoe mesto: Mixtral
+uprjotsja v STENU OZU na 13B aktivnyh (2 exp x14336, 6.5 GB/tok / 24.8 GB/s = 262ms = ~3.8 tok/s).
+Statika-sloёv na kartu osvobodit tolko dolju vnimanija (~+15% max, eksperty na CPU). POTOLOK
+Mixtral ~4.5 tok/s = MODEL (13B aktiv), ne dvizhok. --gpu-static-layers dlja llama otlozhen
+(marginalno; nuzhny null-guardy q_norm v gpu_static.cpp 1427/1456). Card-put golovy dlja llama validen.
+
+## 2026-09-07 deepseek4 STADIJA 0 PROVERENA (nash dvizhok)
+Registry ArchId::DEEPSEEK4 + Dsv4Weights struct + collect_dsv4 (realnye imena: attn_q_a/q_a_norm/q_b,
+attn_kv latent, attn_kv_a_norm, attn_output_a/b, hc_attn_*, hc_ffn_*, eksperty 256+shexp, gate_tid2eid).
+Test (--no-ref): model gruzitsja (43 sloja 64/1), collect_dsv4 nashjol VSE tenzory (0 "net tenzora"
+po 43 slojam), chistyj otkaz na grafe (n_set 0 = Stadija 1). ETALON deepseek4 FORKA PADAET na init
+(ggml.c:9166 GGML_ASSERT ggml_is_contiguous(mask)) - kak llama-etalon byl sloman => validacija
+Stadii 1 TOLKO po svjaznosti, decode-check nevozmozhen. --no-ref objazatelen dlja deepseek4.
+Stadija 1 (build_deepseek4_step: MLA+HC Sinkhorn+sqrt-softplus+hash) = 2-4 sessii, potolok <1-2 tok/s.
+
+## 2026-09-07 Optimizacii (3 agenta) + realizacija VirtualUnlock
+- FIT (odna-ochered-na-token): UZHE realizovano v forke - dvizhok forsit GGML_VK_SUBMIT_DIVISOR=1
+  (gpu_static.cpp:82-90), 1 submit/sloj-graf. Slit sloi nelzja (CPU-eksperty mezhdu nimi po dannym).
+  30B ~24 tok/s uzhe na etom rychage. Delat nechego, proverit GGML_VK_SUBMIT_STATS=1.
+- NONFIT #1 REALIZOVANO: VirtualUnlock-vytesnenie static-stranic posle --gpu-static-layers
+  (memex-fwd.cpp posle init_layers). Static na karte -> ego mmap-dubli v OZU vygnany v standby ->
+  page-cache pod goryachih ekspertov -> vyshe hit-rate. Bez lishnih chtenij. MEMEX_EVICT_STATIC=0 vykl.
+  Ozhidanie: no-copy 7.7 -> ~8.5-9.5 na Coder-Next. A/B zamer posle sborki.
+- NONFIT rang dalshe: SSD-only miss-spill (23ms->3.4ms, cold-start+bolshie), low-bit cold kopija
+  (flat ne po heat), predictor prefetch NET na HDD (2.62->1.81). 10x rychag off-engine: REAP/SSD/RAM.
+- MODELI (sent 2026): Qwen3-30B-A3B-2507 trio (arh besplatna, ~15-19), gpt-oss-20b (novaja arh, ROI).
+  GLM-5.2/Kimi K3 VYSHLI (polzovatel popravil) no slishkom bolshie dlja 32GB. Polzovatel: 32GB ne
+  predel, predskatel gonjaet ne-vlezajushchie - poetomu fokus na residency (VirtualUnlock ^).
+
+## 2026-09-07 deepseek4 GRAF SKOMPILIROVALSJA (nash dvizhok, port iz forka)
+build_deepseek4_step + dsv4_hc_pre/post/head vstavleny, razvedeny (ArchModel dsv4 + arch_deepseek4_model
++ build_any + main dispatch). Ispravlena kollizija imjon (bool arch_deepseek4 vs funkcija -> arch_deepseek4_model,
+kak arch_llama_model). BUILD#10 GODNA - ves graf (MLA+mHC Sinkhorn+sqrt-softplus+un-rope+custom-ops
+ggml_hc_pre/post/sqrt_softplus/rope_ext_inplace/scale_bias/repeat_4d/soft_max_add_sinks) skompilirovalsja.
+Signtury agenta verny. Dalee: regressija (starye arh) + zapusk DeepSeek na SVJAZNOST (etalon padaet,
+decode-check nevozmozhen). Korrektnost pod voprosom (6 unsure spots agenta: W, kv_a_norm, un-rope, mHC
+slicing, F16 latent). Skorost <1-2 tok/s (90GB HDD).
+
+## 2026-09-07 deepseek4 KORREKTNOST: bag najden (sverka so STOKOM llama.cpp) + fix
+DeepSeek vydaval "France. France. France" (tema verna, no povtor) - NE rope (YaRN chist: dense sloi
+ext_factor=0, kq_scale=1/sqrt sovpadaet so stokom). Bag v MoE-gejtinge (sverka s upstream llama.cpp
+build_deepseek2 - forkovyj deepseek4 padaet, emu ne doverjaem, sovet polzovatelja):
+- #1 GLAVNYJ: propushchen expert_weights_scale (=1.5 iz dry-run) - referens umnozhaet routed vesa na
+  1.5 POSLE renorma (shared bez masshtaba). Bez nego routed v 1.5x slabee -> shared dominiruet ->
+  tema derzhitsja no specializirovannyj put (Paris) ne vystrelivaet -> eho salient-slova.
+- #2: propushchen exp_probs_b (e_score_correction_bias) - smeshchaet TOLKO vybor top-k, vesa iz probs.
+FIX (5 pravok): HParams expert_weights_scale + read; Dsv4Weights exp_probs_b + collect; graf: bias
+vybora (sel_probs=probs+exp_probs_b) + weights=scale(weights, 1.5) posle renorma. expert_weights_norm=true
+(renorm ostavlen). build#13 + coherence#2 v hode. Rope/mHC/un-rope CHISTY (sverены).
+
+## 2026-09-07 *** deepseek4 KORREKTEN! *** (mandat vypolnen)
+Promt "The capital of France is" -> "is Paris. The capital of England is" - SVJAZNO, GRAMMATICHNO,
+FAKTICHESKI VERNO (Paris!), osmyslennoe prodolzhenie. Vyrozhdenie USHLO.
+KORNEVOJ BAG: propushchena per-golovnaja gamma-less RMS-norma Q PERED rope (referens ds4_attention
+build_rope: llm_build_norm norm==nullptr). Bez nejo magnitudy Q skachut -> one-hot softmax -> eho.
+Najden sverkoj so STOKOM llama.cpp (sovet polzovatelja). Fix: q=rms_norm(reshape_2d(q, W, n_head*nt)).
+Polnyj nabor fiksov deepseek4 Stadii 1: (1) Q per-head norm [GLAVNYJ], (2) expert_weights_scale 1.5,
+(3) exp_probs_b bias vybora, (4) cache-write registracija g->writes. Rope/mHC/un-rope/fold - CHISTY.
+=> deepseek4 (MLA + hyper-connections Sinkhorn + sqrt-softplus + hash) POLNOSTJU PORTIROVAN v nash
+dvizhok i KORREKTEN. Skorost <1-2 tok/s cold na HDD (s predskatelem/residency bystree). Etalon forka
+padal - validirovano po svjaznosti. build#14.
+
+## 2026-09-07 deepseek4 zamer + optimizacija-vyvod
+deepseek4 KORREKTEN i stabilen: 12 tokenov "The capital of France is Paris. The capital of England
+is London. Her capital" - fakty+grammatika ideal. Skorost: holodnyj 0.26 tok/s (3905 ms/tok), tjoplyj
+0.36 (2780 ms/tok) - skromno. ULIKA: OZU svobodno 25.9 GB vo vremja progona -> page-cache PROSTAIVAET,
+OS-LRU NE derzhit goryachih ekspertov (vytesnjaet mezhdu tokenami) -> kazhdyj token pere-fault s HDD.
+=> PODTVERZHDAET: no-copy (OS-LRU) rezidentnost ne dajot; nuzhen JAVNYJ predskatel/residency (derzhat
+C goryachih ekspertov v OZU prinuditelno). Eto sledujushchaja optimizacija deepseek4: dobavit ExpertStore/
+ResidentSet path v build_deepseek4_step (es/rs param + resident-split; sejchas can_store/can_resident=false).
+Substancialnaja rabota no PRAVILNYJ rychag. Na HDD potolok ostajotsja ~2-4 tok/s pri vysokom hit, no
+25.9GB prostoja -> est kuda rasti ot 0.36. REGRESS4 16/16 (deepseek4 ne slomal starye arh).

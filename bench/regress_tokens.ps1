@@ -13,10 +13,12 @@ param(
     [int]    $Tokens = 32,
     [int]    $Check  = 16,
     [int]    $TimeoutMin = 240,
-    [string] $Golden = 'C:\Users\User11\Desktop\MemeX\bench\golden_decode.json'
+    [string] $Golden = 'C:\Users\User11\Desktop\MemeX\bench\golden_decode.json',
+    # Kakoj exe proverjat: po umolchaniju osnovnaja sborka; vetka-agent peredajot svoj build-wt.
+    [string] $Exe = 'D:\MemeX\src\ik_llama.cpp\build-bt2022\bin\Release\llama-memex-fwd.exe'
 )
 . C:\Users\User11\Desktop\MemeX\bench\lock.ps1
-$EXE = 'D:\MemeX\src\ik_llama.cpp\build-vk\bin\Release\llama-memex-fwd.exe'
+$EXE = $Exe
 $PROMPT = 'D:\MemeX\results\prompt_micro.txt'
 $OUT = 'D:\MemeX\results\regress'
 New-Item -ItemType Directory -Path $OUT -Force -EA SilentlyContinue | Out-Null

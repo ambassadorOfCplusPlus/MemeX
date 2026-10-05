@@ -24,7 +24,7 @@
 
 param(
     [string[]]$Targets = @('llama-cli'),
-    [string]  $Dir     = 'D:/MemeX/src/ik_llama.cpp/build',
+    [string]  $Dir     = 'D:/MemeX/src/ik_llama.cpp/build-bt2022',   # kanonicheskaja sborka: VS2026 snjata, kompiljator = Build Tools 2022 (D:\dev\BuildTools)
     [switch]  $Clean,
     [int]     $Jobs    = 4,
     [int]     $LockMin = 120,
@@ -182,7 +182,7 @@ $srcs = @(
     'D:/MemeX/src/ik_llama.cpp/ggml/src/ggml-vulkan.cpp'
 ) | Where-Object { Test-Path -LiteralPath $_ }
 if ($srcs.Count -gt 0) {
-    $lit = & python 'C:/Users/User11/Desktop/MemeX/bench/check_literals.py' @srcs 2>&1
+    $lit = & py 'C:/Users/User11/Desktop/MemeX/bench/check_literals.py' @srcs 2>&1
     if ($LASTEXITCODE -ne 0) {
         $lit | ForEach-Object { Say ("  " + $_) }
         Say 'oborvannye strokovye literaly - sborka ne zapuskaetsja, mashina ne beryotsja'
